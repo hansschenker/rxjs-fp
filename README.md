@@ -90,7 +90,7 @@ Every non-deprecated RxJS 7.8 function has an rxjs-fp counterpart. Each operator
 Left out on purpose, because RxJS 7 deprecates them and RxJS 8 removes them: `multicast`, `publish*`, `refCount` (use `share` or `connectable`), `pluck`, `mapTo` (use `map`, `as`), `*MapTo`, `flatMap`, `exhaust`, `combineAll`, `pairs`, `retryWhen`, `repeatWhen`, `timeoutWith` (use `timeout({ with })`), and the class exports.
 
 Known differences:
-- **`combineLatest`** completes as soon as one input completes without having emitted (no combination can ever be produced). RxJS waits for the other inputs to complete.
+- **`combineLatest`** (deliberate) completes as soon as one input completes without having emitted, because no combination can ever be produced. RxJS waits for the other inputs to complete. `combineLatestAll` inherits this.
 - **`windowToggle`**: an error from `openings` also errors the open windows.
 - Time operators take the scheduler as an argument instead of RxJS's positional overloads: `bufferTime(span, scheduler, { creationInterval, maxBufferSize })`, `windowTime(span, scheduler, { creationInterval, maxWindowSize })`.
 

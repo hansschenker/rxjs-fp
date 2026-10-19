@@ -181,8 +181,8 @@ describe('higher-order operators match RxJS', () => {
   prop2('combineLatestAll', {
     ours: ({ a, b }) => fp.of(a, b).pipe(fp.combineLatestAll()),
     theirs: ({ a, b }) => rx.of(a, b).pipe(rx.combineLatestAll()),
-    // edge case left out on purpose: an input that completes without a value
-    // ends `combineLatest` here at once, while RxJS waits for the other inputs
+    // inputs that complete without a value are left out: `combineLatest`
+    // deliberately completes early there (see additions.test.ts)
   }, emittingMarbleArb(), emittingMarbleArb(8, 'xy'));
   prop2('zipAll', {
     ours: ({ a, b }) => fp.of(a, b).pipe(fp.zipAll()),

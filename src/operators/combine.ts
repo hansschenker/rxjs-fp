@@ -51,6 +51,11 @@ const runAll = <T extends readonly Observable<unknown>[]>(
  * Emits a tuple of the latest values whenever any source emits, once every
  * source has emitted at least once. The result type is the tuple of the
  * sources' value types.
+ *
+ * Base case: completes when every source has completed.
+ * Edge case, a deliberate difference from RxJS: a source that completes
+ * without ever emitting completes the result at once, since no tuple can
+ * be produced any more. RxJS waits for the other sources to complete.
  */
 export const combineLatest = <const T extends readonly Observable<unknown>[]>(sources: T): Observable<ValuesOf<T>> =>
   sources.length === 0

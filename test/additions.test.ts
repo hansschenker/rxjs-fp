@@ -7,6 +7,7 @@ import {
   audit,
   bindCallback,
   bindNodeCallback,
+  combineLatest,
   connectable,
   createQueueScheduler,
   createReplaySubject,
@@ -36,6 +37,7 @@ import {
   type Observable,
 } from '../src/index.js';
 import { collect } from './helpers.js';
+import { runMarbles } from '../src/testing/index.js';
 
 describe('creation', () => {
   it('generate is a for loop', () => {
@@ -298,6 +300,21 @@ describe('windows are read-only', () => {
   it('a window cannot be pushed into', () => {
     of(1).pipe(windowCount(1)).subscribe((w) => {
       expect('next' in w).toBe(false);
+    });
+  });
+});
+
+describe('combineLatest completes early (deliberate difference from RxJS)', () => {
+  it('completes as soon as a source completes without a value', () => {
+    runMarbles(({ cold, expectObservable }) => {
+      expectObservable(combineLatest([cold('|'), cold('-a--|')] as const)).toBe('|');
+      expectObservable(combineLatest([cold('--|'), cold('a-----|')] as const)).toBe('--|');
+    });
+  });
+
+  it('still waits for every source once all have emitted', () => {
+    runMarbles(({ cold, expectObservable }) => {
+      expectObservable(combineLatest([cold('a|'), cold('-b--|')] as const)).toBe('-p--|', { p: ['a', 'b'] });
     });
   });
 });
