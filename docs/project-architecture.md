@@ -321,6 +321,38 @@ logic lives in a method that needs `this`, a destination subscriber, and a live 
 it will run at all. **The cost of not having classes turned out to be a testability win**, which is
 the strongest argument in this whole document.
 
+### Where the discipline stops: bounded and unbounded state
+
+A machine's state transition must be pure, so growing a collection means copying it — and that cost
+is what decides whether an accumulating operator can be a machine at all. Compare two operators that
+do almost the same thing:
+
+```ts
+// takeLast(n) — a machine. State is capped at n, so the copy is O(n) per value.
+step: (buf, a) => cont(buf.length >= n ? [...buf.slice(1), a] : [...buf, a]),
+
+// toArray — not a machine. State grows without bound.
+const acc: A[] = [];                  // essential per-subscription state, local to the shell
+next: (a) => { acc.push(a); },
+```
+
+Written as a machine, `toArray` would copy an array of length *i* at step *i* — **O(n²)** over a
+stream of n values, for an operator whose whole job is to be linear. `distinct` is the same story
+with a `Set` that never shrinks. So the line the library draws is not "pure versus impure" but
+**bounded versus unbounded**:
+
+| State per subscription | How it is written | Examples |
+|---|---|---|
+| O(1) | `Machine` | `scan`, `pairwise`, `distinctUntilChanged`, `take`, `first`, `every`, `findIndex` |
+| Bounded by a parameter | `Machine`, copying each step | `takeLast(n)`, `bufferCount(size, every)`, `skipLast(n)` |
+| Unbounded | producer with a mutable cell | `toArray`, `distinct` |
+
+Both escape hatches are labelled as "essential state" in their own source comments, which is the
+right way to take one: the discipline is stepped outside of deliberately and visibly, not quietly
+bent, and §13 inventories the cells. The other reasons a machine may be the wrong tool — a second
+event source, an incoming error to transform, an Observable to emit, or any effect at all — are
+structural rather than about cost, and §17 sorts them.
+
 ---
 
 ## 6. Flattening: strategies as data, interpreted once
