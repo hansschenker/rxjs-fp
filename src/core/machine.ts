@@ -45,10 +45,19 @@ export const fromMachine =
     observable<B>((sink) => {
       let state = machine.init(); // the only mutable cell of this execution
       let index = 0;
+      // `halt` means the machine is finished *now*, but `sink.complete()` can
+      // only run after the pending emissions. Latching it first closes the
+      // window in which a re-entrant upstream value (a consumer pushing into
+      // the source from inside `next`) would get its own `step` and slip past
+      // the halt — `take(1)` emitting twice. Same rule as `runMachine`, which
+      // returns on `done` and never flushes afterwards.
+      let halted = false;
       return subscribeChild(source, sink, {
         next: (value) => {
+          if (halted) return;
           const r = machine.step(state, value, index++);
           state = r.state;
+          if (r.done) halted = true;
           for (const out of r.emit) {
             if (sink.closed) return;
             sink.next(out);
@@ -56,6 +65,7 @@ export const fromMachine =
           if (r.done) sink.complete();
         },
         complete: () => {
+          if (halted) return;
           if (machine.flush) {
             const f = machine.flush(state);
             if ('error' in f) {

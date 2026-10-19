@@ -249,6 +249,56 @@ describe('smaller semantic fixes', () => {
     expect(collect(EMPTY.pipe(first(null, 'd')))).toEqual(['d', '|']);
   });
 
+  it('a halted machine refuses re-entrant values (was: take(1) emitted twice)', () => {
+    const s = createSubject<number>();
+    const got: number[] = [];
+    let completions = 0;
+    s.pipe(take(1)).subscribe({
+      next: (v) => {
+        got.push(v);
+        if (v === 1) s.next(99); // re-enter while take(1) is still emitting
+      },
+      complete: () => completions++,
+    });
+    s.next(1);
+    s.next(2);
+    expect(got).toEqual([1]);
+    expect(completions).toBe(1);
+  });
+
+  it('first and elementAt halt on re-entrant values too', () => {
+    const a = createSubject<number>();
+    const seenFirst: number[] = [];
+    a.pipe(first()).subscribe((v) => {
+      seenFirst.push(v);
+      if (v === 1) a.next(99);
+    });
+    a.next(1);
+    expect(seenFirst).toEqual([1]);
+
+    const b = createSubject<number>();
+    const seenAt: number[] = [];
+    b.pipe(elementAt(1)).subscribe((v) => {
+      seenAt.push(v);
+      if (v === 7) b.next(99);
+    });
+    b.next(5);
+    b.next(7);
+    expect(seenAt).toEqual([7]);
+  });
+
+  it('a halted machine does not flush when the source completes re-entrantly', () => {
+    // takeLast has a flush; take halts. Composed, the halt must win and the
+    // flush must not add anything after completion.
+    const s = createSubject<number>();
+    const out = collect(s.pipe(take(2)));
+    s.next(1);
+    s.next(2);
+    s.next(3);
+    s.complete();
+    expect(out).toEqual([1, 2, '|']);
+  });
+
   it('the virtual scheduler stops a zero-delay infinite loop instead of hanging', () => {
     const vs = createVirtualScheduler();
     const loop = (): void => {
