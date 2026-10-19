@@ -10,6 +10,12 @@ them are already available in plain functions, and the fifth — encapsulated mu
 exactly the thing a reactive library should be forced to declare explicitly, one subscription at a
 time.
 
+> **On the code in this document.** Snippets are quoted from the file named beside them, but about a
+> third are abridged for reading: bodies elided as `/* … */`, short multi-line expressions folded
+> onto one line, and occasionally a clarifying comment added that is not in the source. Treat them
+> as faithful illustrations, not as a diffable copy — the `file:line` references are the
+> authoritative pointer, and they were checked against the tree at the commit that added them.
+
 ---
 
 ## 1. What a `class` gives you, and what replaces it
@@ -125,7 +131,7 @@ export const reportUnhandledError = (err: unknown): void => {
 };
 ```
 
-That is design rule 6 — *errors never escape the pipeline* — reduced to nine lines. A consumer
+That is design rule 6 — *errors never escape the pipeline* — reduced to five lines. A consumer
 callback that throws becomes an uncaught error at the top level, where your monitoring sees it; it
 never re-enters the pipeline and never corrupts an in-flight emission.
 
@@ -198,8 +204,8 @@ export const pipeArray =
 
 That loop is the entire implementation behind `pipe(value, ...fns)`, `flow(...fns)` and
 `Observable.pipe`. Everything else in `src/core/pipe.ts` is overload signatures: ten for `pipe`,
-nine for `flow`, and in `src/core/types.ts` a `PipeMethod<A>` interface with ten overloads whose last
-one accepts `...rest` so chains longer than nine operators still compile, with the tail degrading to
+eight for `flow`, and in `src/core/types.ts` a `PipeMethod<A>` interface with eleven call signatures
+whose last one accepts `...rest` so chains longer than nine operators still compile, with the tail degrading to
 `Observable<unknown>` — the same ceiling RxJS has, for the same reason.
 
 The deeper point: RxJS's `pipe` is `Observable.prototype.pipe`, which calls `pipeFromArray` and
@@ -285,8 +291,8 @@ The fix is a `let halted`, set from `r.done` *before* the emit loop and checked 
 sites in the library, and seven of them emit a value as they halt: `take`, `first`, `elementAt`,
 `every`, `find`, `findIndex`, `isEmpty` (plus `takeWhile`, which emits only when `inclusive`). Every
 one of them had the same bug, in the same way, for the same reason — and one latch in the shell
-corrected all of them at once, including the four in `src/operators/conditional.ts` that were
-written after the fix landed and inherited the correctness for free.
+corrected all of them at once — including the four in `src/operators/conditional.ts`, which were
+written independently and were repaired without being touched.
 
 The `complete` handler checks the latch too, so a machine that has halted never also runs its
 `flush` — which is exactly what `runMachine` already did by returning on `done`, so the two
@@ -529,8 +535,15 @@ a user-facing feature and become internal machinery.
 buffering and windowing cut the source the same way and differ only in delivery — **a buffer is an
 array emitted when the chunk closes; a window is an Observable emitted when the chunk opens**, which
 then streams the chunk's values live. So `buffer`/`bufferTime`/`bufferToggle`/`bufferWhen` and
-`window`/`windowCount`/`windowTime`/`windowToggle`/`windowWhen` are the same nine decisions made
-twice, with `subscribeInner` (§3.3) carrying every notifier and closing-selector.
+`window`/`windowCount`/`windowTime`/`windowToggle`/`windowWhen` are nine operators in one file —
+four buffers and five windows — with `subscribeInner` (§3.3) carrying every notifier and
+closing-selector.
+
+The asymmetry is the instructive part. `bufferCount` is absent from that file: it lives in
+`src/operators/transform.ts` as a Mealy machine (§5), because a count-based buffer needs no notifier
+and its state really is just a value. `windowCount` cannot make the same move, because emitting a
+window means manufacturing a Subject, and a machine may only return values. The buffer/window
+symmetry breaks exactly where the §17 decision procedure says it must.
 
 One detail matters more than it looks: each window is a Subject handed out through
 `asObservable()`. That is what makes the emitted window read-only — a consumer holding it cannot
@@ -1134,7 +1147,7 @@ Then the invariants, each with the place that enforces it:
 | Inner-subscription bookkeeping inside operator classes | `subscribeInner` → a frozen `Inner` handle closable before assignment | `src/operators/inner.ts` |
 | `generate` / `bindCallback` / `bindNodeCallback` / `scheduled` | plain functions; `scheduled` derives from `subscribeOn` + `observeOn` | `src/creation/scheduled.ts`, `bind.ts` |
 | `class Subject extends Observable implements Observer` | `createSubject()` → record of closures over an observer `Set` | `src/subject/subject.ts` |
-| `BehaviorSubject`/`ReplaySubject`/`AsyncSubject` overriding `_subscribe` | `makeSubject({ onNext, onSubscribe })` hooks | `src/subject/subject.ts:34` |
+| `BehaviorSubject`/`ReplaySubject`/`AsyncSubject` overriding `_subscribe` | `makeSubject({ onNext, onSubscribe })` hooks | `src/subject/subject.ts:35` |
 | `class ConnectableObservable` + `multicast`/`refCount` | `share(config)`; `shareReplay` = `share` with a replay connector | `src/subject/subject.ts:237` |
 | `class EmptyError extends Error` et al. | `tagged(name, msg)` + `name`-based guards | `src/core/errors.ts` |
 | `instanceof Observable` | `isObservable` via a `Symbol.for` brand | `src/core/types.ts:63` |
