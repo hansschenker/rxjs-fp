@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { map } from '../../src/index.js';
 import { runMarbles } from '../../src/testing/index.js';
 import { intents, loadEffect, memoryStorage, model$, persistEffect } from './src/app.js';
@@ -8,6 +11,9 @@ import { selectedTodo, stats, visibleTodos } from './src/selectors.js';
 import { replay, update } from './src/update.js';
 
 const titles = (m: Model): string => visibleTodos(m).map((t) => `${t.done ? '+' : '-'}${t.title}`).join(',');
+
+/** `selectedId/editingId`, with `-` for null — the two cursors of the Read and Update flows. */
+const marks = (m: Model): string => `${m.selectedId ?? '-'}/${m.editingId ?? '-'}`;
 
 describe('update: pure reducers (no streams needed)', () => {
   it('C: adds with increasing ids and ignores blank titles', () => {
@@ -23,6 +29,44 @@ describe('update: pure reducers (no streams needed)', () => {
     const m = replay(initialModel, [Msg.add('a'), Msg.select(1)]);
     expect(selectedTodo(m)?.title).toBe('a');
     expect(update(Msg.select(99))(m)).toBe(m);
+  });
+
+  it('R: deselect clears the selection', () => {
+    const m = replay(initialModel, [Msg.add('a'), Msg.select(1)]);
+    expect(m.selectedId).toBe(1);
+    expect(update(Msg.deselect())(m).selectedId).toBeNull();
+    // deselecting twice is harmless
+    expect(update(Msg.deselect())(update(Msg.deselect())(m)).selectedId).toBeNull();
+  });
+
+  it('U: the edit lifecycle sets and clears editingId', () => {
+    const m = replay(initialModel, [Msg.add('a'), Msg.add('b')]);
+    expect(m.editingId).toBeNull();
+
+    const editing = update(Msg.startEdit(1))(m);
+    expect(editing.editingId).toBe(1);
+
+    // cancelling leaves the title alone
+    const cancelled = update(Msg.cancelEdit())(editing);
+    expect(cancelled.editingId).toBeNull();
+    expect(titles(cancelled)).toBe('-a,-b');
+
+    // committing a rename ends the edit
+    const renamed = update(Msg.rename(1, 'A'))(editing);
+    expect(renamed.editingId).toBeNull();
+    expect(titles(renamed)).toBe('-A,-b');
+
+    // starting a new edit while one is open just moves the cursor
+    expect(update(Msg.startEdit(2))(editing).editingId).toBe(2);
+  });
+
+  it('U: removing the todo under edit clears editingId', () => {
+    const editing = replay(initialModel, [Msg.add('a'), Msg.add('b'), Msg.startEdit(2)]);
+    expect(update(Msg.remove(2))(editing).editingId).toBeNull();
+    // removing a different one leaves the edit open
+    expect(update(Msg.remove(1))(editing).editingId).toBe(2);
+    // renaming to "" deletes the todo and ends the edit
+    expect(update(Msg.rename(2, '   '))(editing).editingId).toBeNull();
   });
 
   it('U: rename, toggle, toggleAll; renaming to "" deletes', () => {
@@ -75,6 +119,25 @@ describe('model$: merged reducer streams folded by scan (marble tests)', () => {
     });
   });
 
+  it('routes a null on select$ to Deselect and folds the edit lifecycle', () => {
+    runMarbles(({ cold, expectObservable }) => {
+      const add$ = cold('-a----', { a: 'x' });
+      const select$ = cold<number | null>('--s--n', { s: 1, n: null });
+      const startEdit$ = cold<number>('---e--', { e: 1 });
+      const cancelEdit$ = cold<void>('----c-', { c: undefined });
+
+      const view$ = model$(intents({ add$, select$, startEdit$, cancelEdit$ })).pipe(map(marks));
+      expectObservable(view$).toBe('abcdef', {
+        a: '-/-', // initial
+        b: '-/-', // add: selection untouched
+        c: '1/-', // select 1
+        d: '1/1', // start editing 1
+        e: '1/-', // cancel the edit, keep the selection
+        f: '-/-', // null on select$ means Deselect
+      });
+    });
+  });
+
   it('is shared: two views see one state machine', () => {
     runMarbles(({ cold, expectObservable }) => {
       const model = model$(intents({ add$: cold('-a|', { a: 'x' }) }));
@@ -82,6 +145,28 @@ describe('model$: merged reducer streams folded by scan (marble tests)', () => {
       expectObservable(model.pipe(map((m) => m.todos.length))).toBe('ab|', { a: 0, b: 1 });
       expectObservable(model.pipe(map((m) => m.nextId))).toBe('ab|', { a: 1, b: 2 });
     });
+  });
+});
+
+describe('the browser edge', () => {
+  /**
+   * The view declares its actions as `data-action="…"` and the browser entry
+   * wires each one to an intent stream. Nothing else connects the two, so a
+   * button can be rendered with no stream behind it and look perfectly fine
+   * — which is exactly how the detail panel's "close" button stayed dead.
+   * Compare the two sets as source text; no DOM needed.
+   */
+  it('every action the view renders is wired to an intent', () => {
+    const dir = dirname(fileURLToPath(import.meta.url));
+    const view = readFileSync(join(dir, 'src/view.ts'), 'utf8');
+    const main = readFileSync(join(dir, 'browser/main.ts'), 'utf8');
+
+    const rendered = new Set([...view.matchAll(/data-action="([a-z-]+)"/g)].map((m) => m[1]));
+    const wired = new Set([...main.matchAll(/action\(\s*'[a-z]+'\s*,\s*'([a-z-]+)'\s*\)/g)].map((m) => m[1]));
+
+    expect(rendered.size).toBeGreaterThan(0);
+    expect([...rendered].filter((a) => !wired.has(a))).toEqual([]); // rendered but dead
+    expect([...wired].filter((a) => !rendered.has(a))).toEqual([]); // wired but never rendered
   });
 });
 

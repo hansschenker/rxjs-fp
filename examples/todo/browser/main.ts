@@ -72,7 +72,9 @@ const cancelEdit$ = editKey$.pipe(
 
 const app = intents({
   add$,
-  select$: action('click', 'select').pipe(map(idOf)),
+  // `null` means Deselect (see `reducers` in ../src/app.ts); the detail
+  // panel's close button is what sends it.
+  select$: merge(action('click', 'select').pipe(map(idOf)), action('click', 'deselect').pipe(map(() => null))),
   startEdit$: merge(action('click', 'edit'), action('dblclick', 'select')).pipe(map(idOf)),
   cancelEdit$,
   rename$,
