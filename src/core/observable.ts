@@ -1,4 +1,4 @@
-import { createSubscription, isSubscription } from './subscription.js';
+import { createSubscription } from './subscription.js';
 import { reportUnhandledError } from './report.js';
 import { pipeArray } from './pipe.js';
 import {
@@ -13,21 +13,45 @@ import {
   type Teardown,
 } from './types.js';
 
+/** Anything an execution can be scoped to: a downstream sink or a subscription. */
+export interface Scope {
+  readonly add: (finalizer: Teardown) => Teardown;
+}
+
 /**
  * Internal marker: an observer created by an operator for its upstream.
  * Subscribing with such an observer links the new execution to the
- * downstream sink *before* the producer runs, so that synchronous early
+ * downstream scope *before* the producer runs, so that synchronous early
  * termination (e.g. `take(1)` on an infinite synchronous source) stops the
  * upstream loop immediately.
  */
 const PARENT: unique symbol = Symbol('rxjs-fp/parent');
 
 interface ChildObserver<A> extends Observer<A> {
-  readonly [PARENT]: Sink<unknown>;
+  readonly [PARENT]: Scope;
 }
 
 const isChildObserver = <A>(o: unknown): o is ChildObserver<A> =>
   typeof o === 'object' && o !== null && PARENT in o;
+
+/**
+ * A subscriber from another implementation (an RxJS Subscriber, or one of
+ * our own sinks passed directly): it has `next`, a `closed` flag and `add`.
+ * We link to it the same way, so its unsubscription stops our producer.
+ */
+interface ForeignSubscriber {
+  readonly closed: boolean;
+  readonly next: (value: never) => void;
+  readonly add: (teardown: () => void) => unknown;
+  readonly remove?: (teardown: () => void) => unknown;
+}
+
+const isForeignSubscriber = (o: unknown): o is ForeignSubscriber =>
+  typeof o === 'object' &&
+  o !== null &&
+  'closed' in o &&
+  typeof (o as ForeignSubscriber).add === 'function' &&
+  typeof (o as ForeignSubscriber).next === 'function';
 
 const noop = (): void => {};
 
@@ -120,16 +144,19 @@ export const observable = <A>(producer: Producer<A>): Observable<A> => {
     if (child) {
       // Link to the downstream execution first (see PARENT above) and
       // unlink again when we finish on our own, so parents don't leak.
-      const parent = o[PARENT];
-      const unlink = parent.add(subscription.unsubscribe);
+      const unlink = o[PARENT].add(subscription.unsubscribe);
       subscription.add(unlink);
+    } else if (isForeignSubscriber(o)) {
+      const unsubscribe = (): void => subscription.unsubscribe();
+      const removed = o.add(unsubscribe);
+      subscription.add(typeof removed === 'function' ? (removed as Teardown) : () => o.remove?.(unsubscribe));
     }
     const sink = createSink(child ? o : toObserver(o), subscription, child);
     if (subscription.closed) return subscription; // downstream already gone
     try {
       const teardown = producer(sink);
       if (typeof teardown === 'function') subscription.add(teardown);
-      else if (isSubscription(teardown)) subscription.add(teardown.unsubscribe);
+      else if (teardown && typeof teardown.unsubscribe === 'function') subscription.add(() => teardown.unsubscribe());
     } catch (e) {
       sink.error(e);
     }
@@ -166,8 +193,17 @@ export interface ChildHandlers<A> {
  *   operator does can escape the pipeline as an unhandled error.
  * - The upstream execution is linked to `sink`: when the downstream closes,
  *   the upstream is unsubscribed, synchronously.
+ * - Missing handlers forward to the sink, so the types require the
+ *   upstream values to fit the sink when `next` is not given.
  */
-export const subscribeChild = <A, B = A>(source: Observable<A>, sink: Sink<B>, handlers: ChildHandlers<A> = {}): Subscription => {
+export function subscribeChild<A>(source: Observable<A>, sink: Sink<A>): Subscription;
+export function subscribeChild<A, B>(
+  source: Observable<A>,
+  sink: Sink<B>,
+  handlers: ChildHandlers<A> & { readonly next: (value: A) => void },
+): Subscription;
+export function subscribeChild<A extends B, B>(source: Observable<A>, sink: Sink<B>, handlers: ChildHandlers<A>): Subscription;
+export function subscribeChild<A, B>(source: Observable<A>, sink: Sink<B>, handlers: ChildHandlers<A> = {}): Subscription {
   const route = (f: () => void): void => {
     try {
       f();
@@ -177,13 +213,22 @@ export const subscribeChild = <A, B = A>(source: Observable<A>, sink: Sink<B>, h
   };
   const { next, error, complete } = handlers;
   const observer: ChildObserver<A> = {
-    [PARENT]: sink as Sink<unknown>,
+    [PARENT]: sink,
     next: next ? (v) => route(() => next(v)) : (v) => sink.next(v as unknown as B),
     error: error ? (e) => route(() => error(e)) : (e) => sink.error(e),
     complete: complete ? () => route(complete) : () => sink.complete(),
   };
   return source.subscribe(observer);
-};
+}
+
+/**
+ * Subscribes `source` inside an arbitrary scope (e.g. a connection
+ * Subscription): the execution is linked to the scope before the producer
+ * runs, so closing the scope stops even a synchronous source.
+ */
+export const subscribeWithin = <A>(source: Observable<A>, scope: Scope, observer: Observer<A>): Subscription =>
+  source.subscribe({ [PARENT]: scope, next: observer.next, error: observer.error, complete: observer.complete } as ChildObserver<A>);
 
 /** Turns a Teardown | Subscription into a Teardown. */
-export const toTeardown = (t: Teardown | Subscription): Teardown => (typeof t === 'function' ? t : t.unsubscribe);
+export const toTeardown = (t: Teardown | { readonly unsubscribe: () => void }): Teardown =>
+  typeof t === 'function' ? t : () => t.unsubscribe();

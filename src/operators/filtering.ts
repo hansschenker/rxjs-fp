@@ -1,6 +1,6 @@
 import { observable, subscribeChild } from '../core/observable.js';
 import { cont, flushError, flushWith, fromMachine, halt } from '../core/machine.js';
-import { emptyError } from '../core/errors.js';
+import { argumentOutOfRangeError, emptyError } from '../core/errors.js';
 import type { Observable, Operator, Subscription } from '../core/types.js';
 import { EMPTY } from '../creation/creation.js';
 import { isSome, type Option } from '../fp/option.js';
@@ -107,14 +107,15 @@ const NO_DEFAULT: unique symbol = Symbol('rxjs-fp/no-default');
 export function first<A>(): Operator<A, A>;
 export function first<A, B extends A>(predicate: (value: A, index: number) => value is B): Operator<A, B>;
 export function first<A>(predicate: (value: A, index: number) => boolean): Operator<A, A>;
-export function first<A, D>(predicate: (value: A, index: number) => boolean, defaultValue: D): Operator<A, A | D>;
+export function first<A, D>(predicate: ((value: A, index: number) => boolean) | null | undefined, defaultValue: D): Operator<A, A | D>;
 export function first<A, D>(
-  predicate: (value: A, index: number) => boolean = () => true,
+  predicate?: ((value: A, index: number) => boolean) | null,
   defaultValue: D | typeof NO_DEFAULT = NO_DEFAULT,
 ): Operator<A, A | D> {
+  const p = predicate ?? (() => true);
   return fromMachine<null, A, A | D>({
     init: () => null,
-    step: (s, a, i) => (predicate(a, i) ? halt(s, [a]) : cont(s)),
+    step: (s, a, i) => (p(a, i) ? halt(s, [a]) : cont(s)),
     flush: () => (defaultValue === NO_DEFAULT ? flushError(emptyError()) : flushWith([defaultValue])),
   });
 }
@@ -122,21 +123,32 @@ export function first<A, D>(
 /** Emits the last value (matching `predicate`) on completion; `EmptyError` if none and no default. */
 export function last<A>(): Operator<A, A>;
 export function last<A>(predicate: (value: A, index: number) => boolean): Operator<A, A>;
-export function last<A, D>(predicate: (value: A, index: number) => boolean, defaultValue: D): Operator<A, A | D>;
+export function last<A, D>(predicate: ((value: A, index: number) => boolean) | null | undefined, defaultValue: D): Operator<A, A | D>;
 export function last<A, D>(
-  predicate: (value: A, index: number) => boolean = () => true,
+  predicate?: ((value: A, index: number) => boolean) | null,
   defaultValue: D | typeof NO_DEFAULT = NO_DEFAULT,
 ): Operator<A, A | D> {
+  const p = predicate ?? (() => true);
   return fromMachine<Option<A>, A, A | D>({
     init: () => ({ _tag: 'None' }),
-    step: (s, a, i) => cont(predicate(a, i) ? { _tag: 'Some', value: a } : s),
+    step: (s, a, i) => cont(p(a, i) ? { _tag: 'Some', value: a } : s),
     flush: (s) =>
       isSome(s) ? flushWith([s.value]) : defaultValue === NO_DEFAULT ? flushError(emptyError()) : flushWith([defaultValue]),
   });
 }
 
-/** Emits only the value at `index`; errors with `EmptyError` if the source is shorter. */
-export const elementAt = <A>(index: number): Operator<A, A> => first<A>((_, i) => i === index);
+/**
+ * Emits only the value at `index`. Errors with `ArgumentOutOfRangeError` if
+ * the source is shorter (unless a default is given); throws on a negative index.
+ */
+export const elementAt = <A, D = A>(index: number, ...defaultValue: [] | [D]): Operator<A, A | D> => {
+  if (index < 0) throw argumentOutOfRangeError();
+  return fromMachine<null, A, A | D>({
+    init: () => null,
+    step: (s, a, i) => (i === index ? halt(s, [a]) : cont(s)),
+    flush: () => (defaultValue.length > 0 ? flushWith([defaultValue[0] as D]) : flushError(argumentOutOfRangeError())),
+  });
+};
 
 /** Discards all values, keeps the terminal notification. */
 export const ignoreElements =

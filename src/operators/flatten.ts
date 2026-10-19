@@ -37,6 +37,10 @@ export const flatMapWith =
       let index = 0;
       let outerDone = false;
       let current: Subscription | null = null;
+      // Switch: only the newest inner may speak. A generation counter makes
+      // this hold even when a new outer value arrives re-entrantly while an
+      // inner is still being subscribed.
+      let generation = 0;
 
       const tryComplete = (): void => {
         if (outerDone && active === 0 && queue.length === 0) sink.complete();
@@ -44,16 +48,24 @@ export const flatMapWith =
 
       const runInner = (a: A): void => {
         const inner = from(project(a, index++));
+        const gen = ++generation;
+        const isCurrent = (): boolean => strategy._tag !== 'Switch' || gen === generation;
         active++;
         const sub = subscribeChild(inner, sink, {
-          next: (b) => sink.next(b),
+          next: (b) => {
+            if (isCurrent()) sink.next(b);
+          },
           complete: () => {
+            if (!isCurrent()) return;
             active--;
             drain();
             tryComplete();
           },
         });
-        if (strategy._tag === 'Switch') current = sub;
+        if (strategy._tag === 'Switch') {
+          if (isCurrent()) current = sub;
+          else sub.unsubscribe(); // superseded while subscribing
+        }
       };
 
       const drain = (): void => {
@@ -68,10 +80,9 @@ export const flatMapWith =
               else queue.push(a);
               return;
             case 'Switch':
-              if (current !== null && !current.closed) {
-                current.unsubscribe();
-                active--;
-              }
+              current?.unsubscribe();
+              current = null;
+              active = 0; // the previous inner is cancelled, finished or superseded
               runInner(a);
               return;
             case 'Exhaust':

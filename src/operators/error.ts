@@ -4,18 +4,19 @@ import { from, timer, type ObservableInput } from '../creation/creation.js';
 import { asyncScheduler, type Scheduler } from '../scheduler/scheduler.js';
 
 /**
- * On error, switches to the Observable returned by `handler`. `caught` is
- * the source itself, so `handler` can resubscribe.
+ * On error, switches to the Observable returned by `handler`. Like RxJS,
+ * `caught` is the resulting Observable (source + catchError), so returning
+ * it restarts the source with the same error handling in place.
  */
 export const catchError =
-  <A, B>(handler: (err: unknown, caught: Observable<A>) => ObservableInput<B>): Operator<A, A | B> =>
+  <A, B>(handler: (err: unknown, caught: Observable<A | B>) => ObservableInput<B>): Operator<A, A | B> =>
   (source) => {
     const self: Observable<A | B> = observable<A | B>((sink) => {
       let current: Subscription | null = null;
       current = subscribeChild(source, sink, {
         error: (err) => {
           current?.unsubscribe();
-          current = subscribeChild(from(handler(err, source)), sink);
+          current = subscribeChild(from(handler(err, self)), sink);
         },
       });
       return () => current?.unsubscribe();

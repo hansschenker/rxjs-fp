@@ -234,7 +234,7 @@ describe('combination', () => {
 describe('time (virtual scheduler, injected)', () => {
   it('delay', () => {
     runMarbles(({ cold, scheduler, expectObservable }) => {
-      expectObservable(cold('a-b|').pipe(delay(2, scheduler))).toBe('--a-b|');
+      expectObservable(cold('a-b|').pipe(delay(2, scheduler))).toBe('--a-(b|)');
     });
   });
 

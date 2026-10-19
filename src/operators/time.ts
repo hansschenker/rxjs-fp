@@ -11,25 +11,31 @@ import { asyncScheduler, type Scheduler } from '../scheduler/scheduler.js';
 
 const noop: Teardown = () => {};
 
-/** Shifts every value (and completion) forward in time by `ms`. Errors are immediate. */
+/**
+ * Shifts every value forward in time by `ms`. Completes once the source has
+ * completed and the last delayed value is out. Errors are immediate.
+ */
 export const delay =
   <A>(ms: number, scheduler: Scheduler = asyncScheduler): Operator<A, A> =>
   (source) =>
     observable((sink) => {
       const pending = new Set<Teardown>();
       let sourceDone = false;
-      const run = (f: () => void): void => {
-        const cancel = scheduler.schedule(() => {
-          pending.delete(cancel);
-          f();
-        }, ms);
-        pending.add(cancel);
+      const maybeComplete = (): void => {
+        if (sourceDone && pending.size === 0) sink.complete();
       };
       const sub = subscribeChild(source, sink, {
-        next: (a) => run(() => sink.next(a)),
+        next: (a) => {
+          const cancel = scheduler.schedule(() => {
+            pending.delete(cancel);
+            sink.next(a);
+            maybeComplete();
+          }, ms);
+          pending.add(cancel);
+        },
         complete: () => {
           sourceDone = true;
-          run(() => sourceDone && sink.complete());
+          maybeComplete();
         },
       });
       return () => {
@@ -78,7 +84,11 @@ export interface ThrottleConfig {
   readonly trailing?: boolean;
 }
 
-/** Emits a value, then ignores values for `ms` (leading by default; trailing optional). */
+/**
+ * Emits a value, then ignores values for `ms` (leading by default). With
+ * `trailing`, the last value seen during a window is emitted when it ends;
+ * a pending trailing value delays completion until then.
+ */
 export const throttleTime =
   <A>(ms: number, scheduler: Scheduler = asyncScheduler, config: ThrottleConfig = {}): Operator<A, A> =>
   (source) =>
@@ -89,8 +99,10 @@ export const throttleTime =
       let cancel: Teardown = noop;
       let hasTrailing = false;
       let trailingValue: A | undefined;
+      let sourceDone = false;
 
       const startWindow = (): void => {
+        if (sink.closed) return;
         throttling = true;
         cancel = scheduler.schedule(endWindow, ms);
       };
@@ -101,7 +113,10 @@ export const throttleTime =
           const v = trailingValue as A;
           trailingValue = undefined;
           sink.next(v);
-          startWindow();
+          if (sourceDone) sink.complete();
+          else startWindow();
+        } else if (sourceDone) {
+          sink.complete();
         }
       };
       const sub = subscribeChild(source, sink, {
@@ -119,8 +134,8 @@ export const throttleTime =
           }
         },
         complete: () => {
-          if (trailing && hasTrailing) sink.next(trailingValue as A);
-          sink.complete();
+          sourceDone = true;
+          if (!(throttling && trailing && hasTrailing)) sink.complete();
         },
       });
       return () => {
@@ -129,13 +144,18 @@ export const throttleTime =
       };
     });
 
-/** After a value arrives, waits `ms` and then emits the most recent value. */
+/**
+ * After a value arrives, waits `ms` and then emits the most recent value.
+ * If the source completes during a window, the pending value is still
+ * emitted at the end of the window, then the result completes.
+ */
 export const auditTime =
   <A>(ms: number, scheduler: Scheduler = asyncScheduler): Operator<A, A> =>
   (source) =>
     observable((sink) => {
       let cancel: Teardown | null = null;
       let last: A | undefined;
+      let sourceDone = false;
       const sub = subscribeChild(source, sink, {
         next: (a) => {
           last = a;
@@ -143,8 +163,13 @@ export const auditTime =
             cancel = scheduler.schedule(() => {
               cancel = null;
               sink.next(last as A);
+              if (sourceDone) sink.complete();
             }, ms);
           }
+        },
+        complete: () => {
+          sourceDone = true;
+          if (cancel === null) sink.complete();
         },
       });
       return () => {

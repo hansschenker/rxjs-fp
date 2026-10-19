@@ -8,6 +8,8 @@ import {
   of,
   pipe,
   startWith,
+  observable,
+  subscribeChild,
   withLatestFrom,
   zip,
   type Observable,
@@ -56,6 +58,13 @@ describe('static types', () => {
       let_('c', ({ a, b }) => a + b.length),
     );
     expectTypeOf(r).toEqualTypeOf<Observable<{ readonly a: number; readonly b: string; readonly c: number }>>();
+  });
+
+  it('rejects ill-typed chains and unchecked forwarding', () => {
+    // @ts-expect-error string projection on a number stream
+    of(1).pipe(map((s: string) => s.length));
+    // @ts-expect-error forwarding numbers into a string sink without a `next` handler
+    observable<string>((sink) => subscribeChild(of(1), sink));
   });
 
   it('Option is a tagged union', () => {

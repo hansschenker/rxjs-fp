@@ -1,4 +1,5 @@
-import { observable, subscribeChild } from '../core/observable.js';
+import { observable, subscribeChild, subscribeWithin } from '../core/observable.js';
+import { createSubscription } from '../core/subscription.js';
 import { objectUnsubscribedError } from '../core/errors.js';
 import type { Observable, Observer, Operator, Sink, Subscription } from '../core/types.js';
 import { asyncScheduler, type Scheduler } from '../scheduler/scheduler.js';
@@ -83,6 +84,11 @@ const makeSubject = <A>(hooks: {
 
   const subject: Subject<A> = Object.freeze({
     ...obs,
+    // like RxJS 7: subscribing to a disposed subject throws synchronously
+    subscribe: (o?: Parameters<Observable<A>['subscribe']>[0]) => {
+      check();
+      return obs.subscribe(o);
+    },
     next,
     error,
     complete,
@@ -151,7 +157,7 @@ export const createReplaySubject = <A>(
   let buffer: ReadonlyArray<{ readonly at: number; readonly value: A }> = [];
   const trim = (): void => {
     const now = scheduler.now();
-    const fresh = buffer.filter((e) => now - e.at <= windowTime);
+    const fresh = buffer.filter((e) => now - e.at < windowTime);
     buffer = fresh.length > bufferSize ? fresh.slice(fresh.length - bufferSize) : fresh;
   };
   const core = makeSubject<A>({
@@ -243,18 +249,30 @@ export const share =
     let terminated = false;
 
     const reset = (): void => {
-      connection?.unsubscribe();
+      const c = connection;
       connection = null;
       subject = null;
       terminated = false;
+      c?.unsubscribe();
     };
 
     return observable<A>((sink) => {
       refCount++;
+      // Registered first, so it also runs when a synchronous source makes
+      // the downstream close while we are still connecting.
+      sink.add(() => {
+        refCount--;
+        if (refCount === 0 && resetOnRefCountZero && !terminated) reset();
+      });
       const s = (subject ??= connector());
-      const inner = subscribeChild(s, sink);
-      if (!connection && !terminated) {
-        const conn = source.subscribe({
+      subscribeChild(s, sink);
+      if (connection === null && !terminated && !sink.closed) {
+        // The connection exists *before* the source runs: re-entrant
+        // subscribers see it (no second connection), and closing it stops
+        // even a synchronous source.
+        const conn = createSubscription();
+        connection = conn;
+        subscribeWithin(source, conn, {
           next: (a) => s.next(a),
           error: (e) => {
             terminated = true;
@@ -267,14 +285,7 @@ export const share =
             s.complete();
           },
         });
-        // A synchronous source may already have terminated (and reset) above.
-        if (subject === s && !terminated) connection = conn;
       }
-      return () => {
-        refCount--;
-        inner.unsubscribe();
-        if (refCount === 0 && resetOnRefCountZero && !terminated) reset();
-      };
     });
   };
 

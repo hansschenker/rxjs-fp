@@ -96,5 +96,6 @@ export interface PipeMethod<A> {
   <B, C, D, E, F, G, H>(ab: Operator<A, B>, bc: Operator<B, C>, cd: Operator<C, D>, de: Operator<D, E>, ef: Operator<E, F>, fg: Operator<F, G>, gh: Operator<G, H>): Observable<H>;
   <B, C, D, E, F, G, H, I>(ab: Operator<A, B>, bc: Operator<B, C>, cd: Operator<C, D>, de: Operator<D, E>, ef: Operator<E, F>, fg: Operator<F, G>, gh: Operator<G, H>, hi: Operator<H, I>): Observable<I>;
   <B, C, D, E, F, G, H, I, J>(ab: Operator<A, B>, bc: Operator<B, C>, cd: Operator<C, D>, de: Operator<D, E>, ef: Operator<E, F>, fg: Operator<F, G>, gh: Operator<G, H>, hi: Operator<H, I>, ij: Operator<I, J>): Observable<J>;
-  (...operators: ReadonlyArray<Operator<any, any>>): Observable<unknown>;
+  /** Longer chains: the first nine operators stay type-checked, like RxJS. */
+  <B, C, D, E, F, G, H, I, J>(ab: Operator<A, B>, bc: Operator<B, C>, cd: Operator<C, D>, de: Operator<D, E>, ef: Operator<E, F>, fg: Operator<F, G>, gh: Operator<G, H>, hi: Operator<H, I>, ij: Operator<I, J>, ...rest: ReadonlyArray<Operator<any, any>>): Observable<unknown>;
 }

@@ -1,5 +1,6 @@
 import { observable, isObservable, subscribeChild } from '../core/observable.js';
 import type { Observable, Subscribable } from '../core/types.js';
+import { createSubscription } from '../core/subscription.js';
 import { asyncScheduler, type Scheduler } from '../scheduler/scheduler.js';
 import { isSome, type Option } from '../fp/option.js';
 
@@ -41,16 +42,21 @@ export const defer = <A>(factory: () => ObservableInput<A>): Observable<A> =>
 export const fromIterable = <A>(iterable: Iterable<A>): Observable<A> =>
   observable((sink) => {
     const it = iterable[Symbol.iterator]();
+    let exhausted = false;
     try {
       for (;;) {
         if (sink.closed) return;
         const r = it.next();
-        if (r.done) break;
+        if (r.done) {
+          exhausted = true;
+          break;
+        }
         sink.next(r.value);
       }
       sink.complete();
     } finally {
-      if (sink.closed) it.return?.();
+      // only close the iterator when we stopped early (like a `for…of` break)
+      if (!exhausted) it.return?.();
     }
   });
 
@@ -74,30 +80,76 @@ export const fromPromise = <A>(p: PromiseLike<A>): Observable<A> =>
 export const fromAsyncIterable = <A>(xs: AsyncIterable<A>): Observable<A> =>
   observable((sink) => {
     const it = xs[Symbol.asyncIterator]();
+    let exhausted = false;
     const pull = (): void => {
       if (sink.closed) return;
-      it.next().then(
+      let step: Promise<IteratorResult<A>>;
+      try {
+        step = Promise.resolve(it.next());
+      } catch (e) {
+        sink.error(e);
+        return;
+      }
+      step.then(
         (r) => {
-          if (r.done) sink.complete();
-          else {
+          if (r.done) {
+            exhausted = true;
+            sink.complete();
+          } else {
             sink.next(r.value);
             pull();
           }
         },
-        (e) => sink.error(e),
+        (e) => {
+          exhausted = true;
+          sink.error(e);
+        },
       );
     };
     pull();
     return () => {
-      void it.return?.();
+      if (exhausted) return;
+      try {
+        Promise.resolve(it.return?.()).catch(() => {});
+      } catch {
+        /* a throwing return() must not break teardown */
+      }
     };
   });
 
-/** Adopts any foreign Observable implementation (RxJS, zen-observable, …). */
+/**
+ * Adopts any foreign Observable implementation (RxJS, zen-observable, …).
+ *
+ * The foreign side receives a subscriber that looks like an RxJS Subscriber
+ * (`closed`, `add`, `remove`, `unsubscribe`), so a synchronous foreign
+ * source sees our downstream close and stops producing.
+ */
 export const fromSubscribable = <A>(s: Subscribable<A>): Observable<A> =>
   observable((sink) => {
-    const sub = s.subscribe({ next: sink.next, error: sink.error, complete: sink.complete });
-    return () => sub.unsubscribe();
+    const scope = createSubscription();
+    sink.add(scope.unsubscribe);
+    const removers = new Map<unknown, () => void>();
+    const subscriber = {
+      next: (v: A) => sink.next(v),
+      error: (e: unknown) => sink.error(e),
+      complete: () => sink.complete(),
+      get closed() {
+        return sink.closed || scope.closed;
+      },
+      add: (t: unknown) => {
+        if (!t) return;
+        const f = typeof t === 'function' ? (t as () => void) : () => (t as { unsubscribe(): void }).unsubscribe();
+        removers.set(t, scope.add(f));
+      },
+      remove: (t: unknown) => {
+        removers.get(t)?.();
+        removers.delete(t);
+      },
+      unsubscribe: () => scope.unsubscribe(),
+    };
+    const sub = s.subscribe(subscriber);
+    scope.add(() => sub.unsubscribe());
+    return scope.unsubscribe;
   });
 
 const isPromiseLike = (x: unknown): x is PromiseLike<unknown> =>

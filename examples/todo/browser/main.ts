@@ -44,24 +44,37 @@ const add$ = fromEvent(form, 'submit').pipe(
 const editKey$ = fromEvent(root, 'keydown').pipe(
   filter((e) => (e.target as HTMLElement).classList.contains('edit')),
 );
+/**
+ * An edit ends exactly once: by Enter, by Escape, or by leaving the field.
+ * Re-rendering removes the input, which fires a late `focusout`; marking the
+ * input as finished keeps that event from committing a cancelled edit.
+ */
+const finish = (e: Event): HTMLInputElement | null => {
+  const el = e.target as HTMLInputElement;
+  if (el.dataset['finished']) return null;
+  el.dataset['finished'] = 'true';
+  return el;
+};
 const rename$ = merge(
   editKey$.pipe(filter((e) => e.key === 'Enter')),
   fromEvent(root, 'focusout').pipe(filter((e) => (e.target as HTMLElement).classList.contains('edit'))),
 ).pipe(
-  map((e) => {
-    const el = e.target as HTMLInputElement;
-    return { id: idOf(el), title: el.value };
-  }),
+  map(finish),
+  filter((el): el is HTMLInputElement => el !== null),
+  map((el) => ({ id: idOf(el), title: el.value })),
+);
+const cancelEdit$ = editKey$.pipe(
+  filter((e) => e.key === 'Escape'),
+  map(finish),
+  filter((el) => el !== null),
+  map(() => undefined),
 );
 
 const app = intents({
   add$,
   select$: action('click', 'select').pipe(map(idOf)),
   startEdit$: merge(action('click', 'edit'), action('dblclick', 'select')).pipe(map(idOf)),
-  cancelEdit$: editKey$.pipe(
-    filter((e) => e.key === 'Escape'),
-    map(() => undefined),
-  ),
+  cancelEdit$,
   rename$,
   toggle$: action('change', 'toggle').pipe(map(idOf)),
   toggleAll$: action('click', 'toggle-all').pipe(map(() => undefined)),

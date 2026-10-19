@@ -61,8 +61,11 @@ export interface VirtualScheduler extends Scheduler {
   readonly advanceBy: (ms: number) => void;
   /** Runs everything due up to and including `time`. */
   readonly advanceTo: (time: number) => void;
-  /** Runs until the queue is empty (or `maxTime` is reached). */
-  readonly flush: (maxTime?: number) => void;
+  /**
+   * Runs until the queue is empty or `maxTime` is reached. Throws after
+   * `maxActions` actions (protects against zero-delay infinite loops).
+   */
+  readonly flush: (maxTime?: number, maxActions?: number) => void;
   /** Number of pending actions. */
   readonly pending: () => number;
 }
@@ -100,12 +103,16 @@ export const createVirtualScheduler = (startTime = 0): VirtualScheduler => {
     };
   };
 
-  const advanceTo = (time: number): void => {
+  const advanceTo = (time: number, maxActions = 1_000_000): void => {
+    let ran = 0;
     for (;;) {
       const head = queue[0];
       if (!head || head.time > time) break;
       queue.shift();
       if (head.cancelled) continue;
+      if (++ran > maxActions) {
+        throw new Error(`rxjs-fp VirtualScheduler: more than ${maxActions} actions at t=${clock}; zero-delay loop?`);
+      }
       clock = head.time;
       head.work();
     }
@@ -113,18 +120,22 @@ export const createVirtualScheduler = (startTime = 0): VirtualScheduler => {
     queue = queue.filter((e) => !e.cancelled);
   };
 
-  const flush = (maxTime = Number.POSITIVE_INFINITY): void => {
+  const flush = (maxTime = Number.POSITIVE_INFINITY, maxActions = 1_000_000): void => {
+    let budget = maxActions;
     for (;;) {
       const head = queue.find((e) => !e.cancelled);
       if (!head || head.time > maxTime) break;
-      advanceTo(head.time);
+      const before = queue.length;
+      advanceTo(head.time, budget);
+      budget -= Math.max(1, before - queue.length);
+      if (budget <= 0) throw new Error(`rxjs-fp VirtualScheduler: more than ${maxActions} actions; zero-delay loop?`);
     }
   };
 
   return Object.freeze({
     now: () => clock,
     schedule,
-    advanceTo,
+    advanceTo: (time: number) => advanceTo(time),
     advanceBy: (ms: number) => advanceTo(clock + ms),
     flush,
     pending: () => queue.filter((e) => !e.cancelled).length,
