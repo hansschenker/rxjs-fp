@@ -1,0 +1,68 @@
+{
+  "name": "rxjs-fp",
+  "version": "0.1.0",
+  "description": "A pure functional, strongly typed reactive extensions library for TypeScript: no classes, no `this`, lawful typeclasses, operators as pure Mealy machines.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Hans Schenker",
+  "contributors": [
+    "Hans Schenker",
+    "Claude Opus 5.5 (Anthropic) <noreply@anthropic.com>"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hansschenker/rxjs-fp.git"
+  },
+  "keywords": [
+    "rxjs",
+    "reactive",
+    "observable",
+    "functional-programming",
+    "fp",
+    "typescript",
+    "mealy-machine"
+  ],
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./fp": {
+      "types": "./dist/fp/index.d.ts",
+      "import": "./dist/fp/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "npm run typecheck && npm test && npm run build",
+    "example:todo": "vite examples/todo/browser",
+    "example:todo:node": "tsx examples/todo/node-demo.ts"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "fast-check": "^4.10.2",
+    "rxjs": "^7.8.2",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9",
+    "vite": "^6.4.4",
+    "vitest": "^3.2.7"
+  }
+}
