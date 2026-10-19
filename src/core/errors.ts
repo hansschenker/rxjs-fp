@@ -33,3 +33,11 @@ export const isArgumentOutOfRangeError = is('ArgumentOutOfRangeError');
 export type ObjectUnsubscribedError = TaggedError<'ObjectUnsubscribedError'>;
 export const objectUnsubscribedError = tagged('ObjectUnsubscribedError', 'object unsubscribed');
 export const isObjectUnsubscribedError = is('ObjectUnsubscribedError');
+
+export type NotFoundError = TaggedError<'NotFoundError'>;
+export const notFoundError = tagged('NotFoundError', 'No matching values');
+export const isNotFoundError = is('NotFoundError');
+
+export type SequenceError = TaggedError<'SequenceError'>;
+export const sequenceError = tagged('SequenceError', 'Too many matching values');
+export const isSequenceError = is('SequenceError');

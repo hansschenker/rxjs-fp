@@ -5,6 +5,9 @@
 
 export const identity = <A>(a: A): A => a;
 
+/** Does nothing. Handy as a default callback. */
+export const noop = (): void => {};
+
 /** @internal untyped worker behind `pipe`, `flow` and `Observable.pipe`. */
 export const pipeArray =
   (fns: ReadonlyArray<(x: any) => any>) =>

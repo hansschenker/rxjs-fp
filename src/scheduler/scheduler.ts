@@ -141,3 +141,46 @@ export const createVirtualScheduler = (startTime = 0): VirtualScheduler => {
     pending: () => queue.filter((e) => !e.cancelled).length,
   });
 };
+
+/**
+ * A trampoline. Work with delay 0 runs synchronously, but work scheduled
+ * while other work is running is queued and run afterwards on the same
+ * stack, so recursive scheduling never grows the stack. Delays > 0 fall
+ * back to the async scheduler.
+ *
+ * The queue is the scheduler's own runtime state, private to this closure.
+ */
+export const createQueueScheduler = (): Scheduler => {
+  const queue: Array<{ readonly work: () => void; cancelled: boolean }> = [];
+  let running = false;
+
+  const schedule = (work: () => void, delay = 0): Teardown => {
+    if (delay > 0) return asyncScheduler.schedule(work, delay);
+    const entry = { work, cancelled: false };
+    queue.push(entry);
+    if (!running) {
+      running = true;
+      try {
+        for (;;) {
+          const next = queue.shift();
+          if (!next) break;
+          if (!next.cancelled) next.work();
+        }
+      } catch (e) {
+        // like RxJS: a failing action drops the rest of this flush
+        queue.length = 0;
+        throw e;
+      } finally {
+        running = false;
+      }
+    }
+    return () => {
+      entry.cancelled = true;
+    };
+  };
+
+  return Object.freeze({ now: () => Date.now(), schedule });
+};
+
+/** The shared trampoline scheduler. */
+export const queueScheduler: Scheduler = createQueueScheduler();

@@ -5,9 +5,10 @@
 ```
 src/core        types · subscription · observable (sink, subscribeChild) · pipe · machine · errors
 src/scheduler   Scheduler interface · async / asap / animationFrame · virtual scheduler
-src/creation    of · from · defer · unfold · timer · fromEvent …
-src/operators   transform · filtering · flatten (strategies) · combine · time · error
-src/subject     subjects · share · shareReplay
+src/creation    of · from · defer · unfold · generate · timer · fromEvent · scheduled · bindCallback …
+src/operators   transform · filtering · conditional · flatten (strategies) · combine · time · error
+                window (buffer*/window*) · group (groupBy) · inner (internal: duration handles)
+src/subject     subjects · share · shareReplay · connectable · connect
 src/fp          Option · Either · HKT · typeclasses · lawful Observable instances · do-notation
 src/testing     marble parser · runMarbles · record
 ```
@@ -42,3 +43,13 @@ src/testing     marble parser · runMarbles · record
 | `Exhaust` | runs it only if no inner is active |
 
 The result completes when the outer has completed, no inners are active and the queue is empty.
+
+## Inner Observables with a handle
+
+Duration selectors (`audit`, `debounce`, `throttle`), closing notifiers (`bufferToggle`, `windowToggle`, `bufferWhen`, `windowWhen`) and the like subscribe to inner Observables that may end themselves *while they are still being subscribed* (a synchronous `of(0)` duration). A `Subscription` variable cannot express that, because it is assigned only after `subscribe` returns.
+
+The internal `subscribeInner(input, sink, handlers)` therefore returns a small handle `{ closed, close }`, creates it *before* subscribing, and passes it to the `next` handler. An operator closes "this inner" through the handle, and checks `handle.closed` instead of a possibly stale variable.
+
+## groupBy and the outer subscriber
+
+`groupBy` is the one operator whose source must outlive its downstream: as in RxJS, unsubscribing from the Observable of groups does not stop the source while a group is still subscribed. The source runs in its own connection scope (`subscribeWithin`) with a count of subscribed groups; the scope is closed when the outer subscriber is gone and the count is zero.

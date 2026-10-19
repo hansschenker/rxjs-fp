@@ -1,7 +1,7 @@
 import { observable, isObservable, subscribeChild } from '../core/observable.js';
 import type { Observable, Subscribable } from '../core/types.js';
 import { createSubscription } from '../core/subscription.js';
-import { asyncScheduler, type Scheduler } from '../scheduler/scheduler.js';
+import { animationFrameScheduler, asyncScheduler, type Scheduler } from '../scheduler/scheduler.js';
 import { isSome, type Option } from '../fp/option.js';
 
 /** Everything `from` understands. */
@@ -257,3 +257,61 @@ export function fromEvent<E>(
     };
   });
 }
+
+/**
+ * Like `fromEvent`, for any add/remove-handler API. `addHandler` registers
+ * the handler; whatever it returns is passed to `removeHandler` on
+ * unsubscribe. A handler called with several arguments emits them as an array.
+ */
+export const fromEventPattern = <A>(
+  addHandler: (handler: (...args: any[]) => void) => unknown,
+  removeHandler?: (handler: (...args: any[]) => void, signal: unknown) => void,
+): Observable<A> =>
+  observable<A>((sink) => {
+    const handler = (...args: unknown[]): void => sink.next((args.length === 1 ? args[0] : args) as A);
+    const signal = addHandler(handler);
+    return removeHandler ? () => removeHandler(handler, signal) : undefined;
+  });
+
+/** Anything that can be released. */
+export interface Unsubscribable {
+  readonly unsubscribe: () => void;
+}
+
+/**
+ * Ties a resource to the lifetime of an Observable: `resourceFactory`
+ * runs on subscription, `observableFactory(resource)` is subscribed, and
+ * the resource is released when the execution ends.
+ */
+export const using = <A, R extends Unsubscribable | void>(
+  resourceFactory: () => R,
+  observableFactory: (resource: R) => ObservableInput<A> | void,
+): Observable<A> =>
+  observable<A>((sink) => {
+    const resource = resourceFactory();
+    sink.add(() => {
+      if (resource) resource.unsubscribe();
+    });
+    const result = observableFactory(resource);
+    subscribeChild(result ? from(result) : EMPTY, sink);
+  });
+
+/**
+ * Emits `{ timestamp, elapsed }` once per animation frame until
+ * unsubscribed. `elapsed` is measured from subscription. Pass another
+ * scheduler for tests: each `schedule(work, 0)` call is one frame.
+ */
+export const animationFrames = (
+  scheduler: Scheduler = animationFrameScheduler,
+): Observable<{ readonly timestamp: number; readonly elapsed: number }> =>
+  observable((sink) => {
+    const start = scheduler.now();
+    let cancel = (): void => {};
+    const frame = (): void => {
+      const timestamp = scheduler.now();
+      sink.next({ timestamp, elapsed: timestamp - start });
+      if (!sink.closed) cancel = scheduler.schedule(frame, 0);
+    };
+    cancel = scheduler.schedule(frame, 0);
+    return () => cancel();
+  });

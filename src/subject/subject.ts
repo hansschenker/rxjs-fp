@@ -3,6 +3,7 @@ import { createSubscription } from '../core/subscription.js';
 import { objectUnsubscribedError } from '../core/errors.js';
 import type { Observable, Observer, Operator, Sink, Subscription } from '../core/types.js';
 import { asyncScheduler, type Scheduler } from '../scheduler/scheduler.js';
+import { from, type ObservableInput } from '../creation/creation.js';
 
 /**
  * A Subject is shared state by definition: one producer, many observers.
@@ -307,3 +308,76 @@ export const shareReplay = <A>(config: number | ShareReplayConfig = {}): Operato
     resetOnRefCountZero: cfg.refCount ?? false,
   });
 };
+
+// ---------------------------------------------------------------------------
+// connectable / connect: multicasting with an explicit connection
+// ---------------------------------------------------------------------------
+
+export interface ConnectableConfig<A> {
+  /** Factory for the Subject that multicasts one connection. Default: `createSubject`. */
+  readonly connector?: () => Subject<A>;
+  /** Use a fresh Subject after the connection ends (unsubscribed, completed or errored). Default: true. */
+  readonly resetOnDisconnect?: boolean;
+}
+
+export interface Connectable<A> extends Observable<A> {
+  /** Subscribes the shared Subject to the source (once; returns the running connection if there is one). */
+  readonly connect: () => Subscription;
+}
+
+/**
+ * A hot Observable that only starts when you call `connect()`. Subscribers
+ * attach to a shared Subject; `connect()` subscribes that Subject to the
+ * source. The replacement for RxJS's `multicast`/`publish` family.
+ */
+export const connectable = <A>(source: Observable<A>, config: ConnectableConfig<A> = {}): Connectable<A> => {
+  const connector = config.connector ?? createSubject;
+  const resetOnDisconnect = config.resetOnDisconnect ?? true;
+  // shared by design: the subject and the connection
+  let subject = connector();
+  let connection: Subscription | null = null;
+
+  const connect = (): Subscription => {
+    if (connection && !connection.closed) return connection;
+    const conn = createSubscription();
+    connection = conn;
+    const s = subject;
+    if (resetOnDisconnect) conn.add(() => (subject = connector()));
+    subscribeWithin(source, conn, {
+      next: (a) => s.next(a),
+      error: (e) => {
+        s.error(e);
+        conn.unsubscribe();
+      },
+      complete: () => {
+        s.complete();
+        conn.unsubscribe();
+      },
+    });
+    return conn;
+  };
+
+  return Object.freeze({
+    ...observable<A>((sink) => subscribeChild(subject, sink)),
+    connect,
+  });
+};
+
+/**
+ * Shares one subscription to the source within `selector`: the selector
+ * receives a multicast view of the source, and the source is connected
+ * after the selector's result has been subscribed, so no value is missed.
+ */
+export const connect =
+  <A, B>(selector: (shared: Observable<A>) => ObservableInput<B>, config: { readonly connector?: () => Subject<A> } = {}): Operator<A, B> =>
+  (source) =>
+    observable<B>((sink) => {
+      const subject = (config.connector ?? createSubject)();
+      subscribeChild(from(selector(subject.asObservable())), sink);
+      if (sink.closed) return;
+      subscribeChild(source, sink, {
+        next: (a) => subject.next(a),
+        error: (e) => subject.error(e),
+        complete: () => subject.complete(),
+      });
+    });

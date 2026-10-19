@@ -1,6 +1,7 @@
 import { observable, subscribeChild } from '../core/observable.js';
 import type { Operator, Subscription } from '../core/types.js';
-import { from, type ObservableInput } from '../creation/creation.js';
+import { defer, from, type ObservableInput } from '../creation/creation.js';
+import { tap } from './transform.js';
 
 /**
  * Flattening strategies as data.
@@ -164,3 +165,32 @@ export const expand =
         },
       });
     });
+
+/**
+ * `scan` whose accumulator returns an Observable, flattened with `strategy`.
+ * Every inner value is emitted and becomes the new accumulated state.
+ * The state is per subscription (created in `defer`).
+ */
+const scanWith =
+  (strategy: FlattenStrategy) =>
+  <A, S>(accumulator: (acc: S, value: A, index: number) => ObservableInput<S>, seed: S): Operator<A, S> =>
+  (source) =>
+    defer(() => {
+      let state = seed;
+      return flatMapWith(strategy)((a: A, i: number) => accumulator(state, a, i))(source).pipe(
+        tap((s: S) => {
+          state = s;
+        }),
+      );
+    });
+
+/** `scan` with an Observable-returning accumulator, merged (up to `concurrent` at once). */
+export const mergeScan = <A, S>(
+  accumulator: (acc: S, value: A, index: number) => ObservableInput<S>,
+  seed: S,
+  concurrent: number = Number.POSITIVE_INFINITY,
+): Operator<A, S> => scanWith(Merge(concurrent))(accumulator, seed);
+
+/** `scan` with an Observable-returning accumulator; a new value cancels the running inner. */
+export const switchScan = <A, S>(accumulator: (acc: S, value: A, index: number) => ObservableInput<S>, seed: S): Operator<A, S> =>
+  scanWith(Switch)(accumulator, seed);

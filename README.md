@@ -68,17 +68,31 @@ Entry points: `rxjs-fp` (core and operators), `rxjs-fp/fp` (Option, Either, type
 
 | Area | Functions |
 |---|---|
-| **Core** | `observable`, `pipe`, `flow`, `subscribeChild`, `fromMachine`, `runMachine` |
-| **Creation** | `of`, `from` (Observable, any Subscribable, Promise, iterable, async iterable, array-like), `defer`, `range`, `unfold`, `interval`, `timer`, `iif`, `fromEvent` (typed for DOM and Node emitters), `EMPTY`, `NEVER`, `throwError` |
-| **Transformation** | `map`, `as`, `scan`, `reduce`, `pairwise`, `bufferCount`, `count`, `toArray`, `defaultIfEmpty`, `tap`, `materialize`/`dematerialize` (notifications as data) |
-| **Filtering** | `filter` (with refinements), `filterMap`, `take`, `takeLast`, `skip`, `takeWhile`, `skipWhile`, `distinct`, `distinctUntilChanged`, `first`, `last`, `elementAt`, `ignoreElements`, `takeUntil`, `skipUntil` |
-| **Flattening** | `flatMapWith(strategy)`, `mergeMap`, `concatMap`, `switchMap`, `exhaustMap`, `*All`, `expand` |
-| **Combination** | `merge`, `concat`, `combineLatest`, `zip`, `forkJoin` (all tuple-typed), `race`, `withLatestFrom`, `startWith`, `endWith`, `*With` |
-| **Time** | `delay`, `debounceTime`, `throttleTime`, `auditTime`, `sampleTime`, `timeout`, `subscribeOn`, `observeOn` |
-| **Errors** | `catchError`, `retry` (count / delay / reset), `repeat`, `finalize`, `onErrorReturn` |
-| **Multicasting** | `createSubject`, `createBehaviorSubject`, `createReplaySubject`, `createAsyncSubject`, `share`, `shareReplay` |
+| **Core** | `observable`, `pipe`, `flow`, `identity`, `noop`, `subscribeChild`, `fromMachine`, `runMachine` |
+| **Creation** | `of`, `from` (Observable, any Subscribable, Promise, iterable, async iterable, array-like), `defer`, `range`, `unfold`, `generate`, `interval`, `timer`, `iif`, `using`, `scheduled`, `fromEvent` (typed for DOM and Node emitters), `fromEventPattern`, `bindCallback`, `bindNodeCallback`, `animationFrames`, `EMPTY`, `NEVER`, `throwError` |
+| **Transformation** | `map`, `as`, `scan`, `reduce`, `pairwise`, `tap`, `toArray`, `count`, `max`, `min`, `defaultIfEmpty`, `materialize`/`dematerialize` (notifications as data), `timestamp`, `timeInterval` |
+| **Buffering / windowing** | `buffer`, `bufferCount`, `bufferTime`, `bufferToggle`, `bufferWhen`, `window`, `windowCount`, `windowTime`, `windowToggle`, `windowWhen` |
+| **Grouping** | `groupBy` (with `element`, `duration`, `connector`), `partition` |
+| **Filtering** | `filter` (with refinements), `filterMap`, `take`, `takeLast`, `skip`, `skipLast`, `takeWhile`, `skipWhile`, `distinct`, `distinctUntilChanged`, `distinctUntilKeyChanged`, `first`, `last`, `single`, `elementAt`, `ignoreElements`, `takeUntil`, `skipUntil` |
+| **Conditional** | `every`, `find`, `findIndex`, `isEmpty`, `sequenceEqual`, `throwIfEmpty`, `defaultIfEmpty` |
+| **Flattening** | `flatMapWith(strategy)`, `mergeMap`, `concatMap`, `switchMap`, `exhaustMap`, `*All`, `expand`, `mergeScan`, `switchScan` |
+| **Combination** | `merge`, `concat`, `combineLatest`, `zip`, `forkJoin` (all tuple-typed), `race`, `onErrorResumeNext`, `withLatestFrom`, `startWith`, `endWith`, `*With` (incl. `raceWith`, `onErrorResumeNextWith`), `combineLatestAll`, `zipAll` |
+| **Time** | `delay`, `delayWhen`, `debounceTime`, `debounce`, `throttleTime`, `throttle`, `auditTime`, `audit`, `sampleTime`, `sample`, `timeout` (ms, or `{ each, first, with }`), `subscribeOn`, `observeOn` |
+| **Errors** | `catchError`, `retry` (count / delay / reset), `repeat`, `finalize`, `onErrorReturn`; error values `emptyError`, `timeoutError`, `notFoundError`, `sequenceError`, … with `is*` guards |
+| **Multicasting** | `createSubject`, `createBehaviorSubject`, `createReplaySubject`, `createAsyncSubject`, `share`, `shareReplay`, `connectable`, `connect` |
 | **Conversion** | `firstValueFrom`, `lastValueFrom`, `toAsyncIterable` |
-| **Schedulers** | `asyncScheduler`, `asapScheduler`, `animationFrameScheduler`, `createVirtualScheduler` |
+| **Schedulers** | `asyncScheduler`, `asapScheduler`, `queueScheduler` (trampoline), `animationFrameScheduler`, `createVirtualScheduler` |
+
+### Coverage of RxJS 7.8
+
+Every non-deprecated RxJS 7.8 function has an rxjs-fp counterpart. Each operator added to close that gap is checked against RxJS itself: `test/differential.test.ts` feeds the same random marble diagrams to both libraries on virtual time and requires identical notifications at identical frames.
+
+Left out on purpose, because RxJS 7 deprecates them and RxJS 8 removes them: `multicast`, `publish*`, `refCount` (use `share` or `connectable`), `pluck`, `mapTo` (use `map`, `as`), `*MapTo`, `flatMap`, `exhaust`, `combineAll`, `pairs`, `retryWhen`, `repeatWhen`, `timeoutWith` (use `timeout({ with })`), and the class exports.
+
+Known differences:
+- **`combineLatest`** completes as soon as one input completes without having emitted (no combination can ever be produced). RxJS waits for the other inputs to complete.
+- **`windowToggle`**: an error from `openings` also errors the open windows.
+- Time operators take the scheduler as an argument instead of RxJS's positional overloads: `bufferTime(span, scheduler, { creationInterval, maxBufferSize })`, `windowTime(span, scheduler, { creationInterval, maxWindowSize })`.
 
 ## Writing an operator
 
