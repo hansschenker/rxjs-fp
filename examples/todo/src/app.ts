@@ -8,7 +8,7 @@ import {
   map,
   merge,
   scan,
-  shareReplay,
+  shareLatest,
   skip,
   startWith,
   tap,
@@ -81,7 +81,7 @@ export const reducers = (i: Intents): Observable<Reducer<Model>> =>
 
 /**
  * MODEL STREAM: fold the merged reducers with `scan`.
- * `startWith` gives subscribers the initial model; `shareReplay` makes
+ * `startWith` gives subscribers the initial model; `shareLatest` makes
  * the one state machine shared by every view and effect.
  */
 export const model$ = (i: Intents, initial: Model = initialModel): Observable<Model> =>
@@ -89,7 +89,7 @@ export const model$ = (i: Intents, initial: Model = initialModel): Observable<Mo
     scan((model: Model, reduce: Reducer<Model>) => reduce(model), initial),
     startWith(initial),
     distinctUntilChanged(),
-    shareReplay({ bufferSize: 1, refCount: true }),
+    shareLatest(),
   );
 
 // ---------------------------------------------------------------------------

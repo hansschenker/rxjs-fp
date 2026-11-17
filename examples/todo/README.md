@@ -43,7 +43,7 @@ export const model$ = (i: Intents, initial = initialModel) =>
     scan((model, reduce) => reduce(model), initial),
     startWith(initial),
     distinctUntilChanged(),
-    shareReplay({ bufferSize: 1, refCount: true }),
+    shareLatest(),
   );
 ```
 

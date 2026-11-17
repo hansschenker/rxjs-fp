@@ -234,3 +234,72 @@ describe('higher-order operators match RxJS', () => {
   });
 });
 
+
+/**
+ * The share family over a scripted scenario with several subscribers:
+ * A subscribes · 1 · B subscribes late · 2 · A and B leave · C subscribes ·
+ * 3 · the source completes · D subscribes. Records what each subscriber
+ * sees and how often the source was subscribed.
+ */
+describe('share lifecycles match RxJS', () => {
+  type Log = { readonly seen: Record<string, unknown[]>; readonly sourceSubscriptions: number };
+
+  const scenarioOurs = (operator: fp.Operator<number, number>): Log => {
+    const seen: Record<string, unknown[]> = { A: [], B: [], C: [], D: [] };
+    let sourceSubscriptions = 0;
+    const feed = fp.createSubject<number>();
+    const source = fp.observable<number>((sink) => {
+      sourceSubscriptions++;
+      return fp.subscribeChild(feed, sink);
+    });
+    const shared = source.pipe(operator);
+    const on = (name: string) => ({ next: (v: number) => seen[name]!.push(v), complete: () => seen[name]!.push('|') });
+    const a = shared.subscribe(on('A'));
+    feed.next(1);
+    const b = shared.subscribe(on('B'));
+    feed.next(2);
+    a.unsubscribe();
+    b.unsubscribe();
+    shared.subscribe(on('C'));
+    feed.next(3);
+    feed.complete();
+    shared.subscribe(on('D'));
+    return { seen, sourceSubscriptions };
+  };
+
+  const scenarioTheirs = (operator: rx.MonoTypeOperatorFunction<number>): Log => {
+    const seen: Record<string, unknown[]> = { A: [], B: [], C: [], D: [] };
+    let sourceSubscriptions = 0;
+    const feed = new rx.Subject<number>();
+    const source = new rx.Observable<number>((subscriber) => {
+      sourceSubscriptions++;
+      return feed.subscribe(subscriber);
+    });
+    const shared = source.pipe(operator);
+    const on = (name: string) => ({ next: (v: number) => seen[name]!.push(v), complete: () => seen[name]!.push('|') });
+    const a = shared.subscribe(on('A'));
+    feed.next(1);
+    const b = shared.subscribe(on('B'));
+    feed.next(2);
+    a.unsubscribe();
+    b.unsubscribe();
+    shared.subscribe(on('C'));
+    feed.next(3);
+    feed.complete();
+    shared.subscribe(on('D'));
+    return { seen, sourceSubscriptions };
+  };
+
+  it('share() vs share()', () => {
+    expect(scenarioOurs(fp.share())).toEqual(scenarioTheirs(rx.share()));
+  });
+  it('shareReplay(2) vs shareReplay(2)', () => {
+    expect(scenarioOurs(fp.shareReplay(2))).toEqual(scenarioTheirs(rx.shareReplay(2)));
+  });
+  it('shareLatest() vs share({ connector: () => new ReplaySubject(1) })', () => {
+    expect(scenarioOurs(fp.shareLatest())).toEqual(scenarioTheirs(rx.share({ connector: () => new rx.ReplaySubject<number>(1) })));
+  });
+  it('shareWith(replay(1), Cached) vs shareReplay(1)', () => {
+    expect(scenarioOurs(fp.shareWith(() => fp.createReplaySubject<number>(1), fp.Cached))).toEqual(scenarioTheirs(rx.shareReplay(1)));
+  });
+});

@@ -219,28 +219,32 @@ export const createAsyncSubject = <A>(): Subject<A> => {
 // share / shareReplay: cold -> hot, explicitly
 // ---------------------------------------------------------------------------
 
-export interface ShareConfig<A> {
-  /** Factory for the Subject that multicasts one connection. Default: `createSubject`. */
-  readonly connector?: () => Subject<A>;
-  /** Reset (new Subject, new source subscription) after the source errors. Default: true. */
-  readonly resetOnError?: boolean;
-  /** Reset after the source completes. Default: true. */
-  readonly resetOnComplete?: boolean;
-  /** Reset (unsubscribe from the source) when the subscriber count drops to 0. Default: true. */
-  readonly resetOnRefCountZero?: boolean;
-}
+/**
+ * When a shared connection starts over. Lifecycles are data, like
+ * flattening and throttle strategies:
+ *
+ *   WhileSubscribed  connected while anyone listens; starts over after an
+ *                    error, after completion, and when the last subscriber leaves
+ *   Cached           connects once and keeps the result, even when nobody
+ *                    listens; starts over only after an error
+ *
+ * "Starting over" means a new Subject from the connector and a new
+ * subscription to the source on the next subscriber.
+ */
+export type ShareLifecycle = { readonly _tag: 'WhileSubscribed' } | { readonly _tag: 'Cached' };
+
+export const WhileSubscribed: ShareLifecycle = Object.freeze({ _tag: 'WhileSubscribed' });
+export const Cached: ShareLifecycle = Object.freeze({ _tag: 'Cached' });
 
 /**
- * Turns a cold Observable hot: all subscribers share one source
- * subscription. The source is connected on the first subscriber.
+ * Shared by every share operator: turns a cold Observable hot, so all
+ * subscribers share one source subscription, connected on the first
+ * subscriber. The three flags say when the connection starts over; the
+ * lifecycles in `shareWith` are the combinations that are offered.
  */
-export const share =
-  <A>(config: ShareConfig<A> = {}): Operator<A, A> =>
+const shareCore =
+  <A>(connector: () => Subject<A>, resetOnError: boolean, resetOnComplete: boolean, resetOnRefCountZero: boolean): Operator<A, A> =>
   (source) => {
-    const connector = config.connector ?? createSubject;
-    const resetOnError = config.resetOnError ?? true;
-    const resetOnComplete = config.resetOnComplete ?? true;
-    const resetOnRefCountZero = config.resetOnRefCountZero ?? true;
 
     // The connection is the one piece of state shared between subscribers,
     // which is exactly the point of `share`.
@@ -290,35 +294,39 @@ export const share =
     });
   };
 
-export interface ShareReplayConfig {
-  readonly bufferSize?: number;
-  readonly windowTime?: number;
-  /** Disconnect from the source when no one is subscribed. Default: false (like RxJS). */
-  readonly refCount?: boolean;
-  readonly scheduler?: Scheduler;
-}
+/**
+ * Turns a cold Observable hot: all subscribers share one source
+ * subscription, multicast through the Subject that `connector` creates,
+ * restarted as `lifecycle` says.
+ *
+ *   source.pipe(shareWith(() => createReplaySubject(10, 5000), Cached))
+ */
+export const shareWith = <A>(connector: () => Subject<A>, lifecycle: ShareLifecycle): Operator<A, A> =>
+  lifecycle._tag === 'WhileSubscribed'
+    ? shareCore<A>(connector, true, true, true)
+    : shareCore<A>(connector, true, false, false);
 
-/** `share` with a ReplaySubject that is kept after completion. */
-export const shareReplay = <A>(config: number | ShareReplayConfig = {}): Operator<A, A> => {
-  const cfg: ShareReplayConfig = typeof config === 'number' ? { bufferSize: config } : config;
-  return share<A>({
-    connector: () => createReplaySubject<A>(cfg.bufferSize, cfg.windowTime, cfg.scheduler),
-    resetOnError: true,
-    resetOnComplete: false,
-    resetOnRefCountZero: cfg.refCount ?? false,
-  });
-};
+/** Shares one source subscription while anyone listens; late subscribers see only later values. */
+export const share = <A>(): Operator<A, A> => shareWith<A>(createSubject, WhileSubscribed);
+
+/**
+ * A cache: connects once, replays the last `bufferSize` values (default:
+ * all) to every subscriber, and keeps them after completion and when nobody
+ * listens. Starts over only after an error.
+ */
+export const shareReplay = <A>(bufferSize: number = Number.POSITIVE_INFINITY): Operator<A, A> =>
+  shareWith<A>(() => createReplaySubject<A>(bufferSize), Cached);
+
+/**
+ * Shares one source subscription while anyone listens, and gives every new
+ * subscriber the latest value at once. Suits state streams.
+ */
+export const shareLatest = <A>(): Operator<A, A> => shareWith<A>(() => createReplaySubject<A>(1), WhileSubscribed);
 
 // ---------------------------------------------------------------------------
 // connectable / connect: multicasting with an explicit connection
 // ---------------------------------------------------------------------------
 
-export interface ConnectableConfig<A> {
-  /** Factory for the Subject that multicasts one connection. Default: `createSubject`. */
-  readonly connector?: () => Subject<A>;
-  /** Use a fresh Subject after the connection ends (unsubscribed, completed or errored). Default: true. */
-  readonly resetOnDisconnect?: boolean;
-}
 
 export interface Connectable<A> extends Observable<A> {
   /** Subscribes the shared Subject to the source (once; returns the running connection if there is one). */
@@ -326,13 +334,12 @@ export interface Connectable<A> extends Observable<A> {
 }
 
 /**
- * A hot Observable that only starts when you call `connect()`. Subscribers
- * attach to a shared Subject; `connect()` subscribes that Subject to the
- * source. The replacement for RxJS's `multicast`/`publish` family.
+ * Shared by `connectable` and `connectableOnce`: a hot Observable that only
+ * starts when you call `connect()`. Subscribers attach to a shared Subject;
+ * `connect()` subscribes that Subject to the source. With
+ * `resetOnDisconnect`, a fresh Subject replaces it after each connection ends.
  */
-export const connectable = <A>(source: Observable<A>, config: ConnectableConfig<A> = {}): Connectable<A> => {
-  const connector = config.connector ?? createSubject;
-  const resetOnDisconnect = config.resetOnDisconnect ?? true;
+const connectableCore = <A>(source: Observable<A>, connector: () => Subject<A>, resetOnDisconnect: boolean): Connectable<A> => {
   // shared by design: the subject and the connection
   let subject = connector();
   let connection: Subscription | null = null;
@@ -364,15 +371,32 @@ export const connectable = <A>(source: Observable<A>, config: ConnectableConfig<
 };
 
 /**
+ * A hot Observable that only starts when you call `connect()`. After a
+ * connection ends (unsubscribed, completed or errored), a fresh Subject from
+ * `connector` takes over, so the next `connect()` starts over. The
+ * replacement for RxJS's `multicast`/`publish` family.
+ */
+export const connectable = <A>(source: Observable<A>, connector: () => Subject<A> = createSubject): Connectable<A> =>
+  connectableCore(source, connector, true);
+
+/**
+ * Like `connectable`, but keeps one Subject for its whole life: after the
+ * source completes or errors, later subscribers get that ending (and, with a
+ * ReplaySubject, the replayed values) instead of a new start.
+ */
+export const connectableOnce = <A>(source: Observable<A>, connector: () => Subject<A> = createSubject): Connectable<A> =>
+  connectableCore(source, connector, false);
+
+/**
  * Shares one subscription to the source within `selector`: the selector
  * receives a multicast view of the source, and the source is connected
  * after the selector's result has been subscribed, so no value is missed.
  */
 export const connect =
-  <A, B>(selector: (shared: Observable<A>) => ObservableInput<B>, config: { readonly connector?: () => Subject<A> } = {}): Operator<A, B> =>
+  <A, B>(selector: (shared: Observable<A>) => ObservableInput<B>, connector: () => Subject<A> = createSubject): Operator<A, B> =>
   (source) =>
     observable<B>((sink) => {
-      const subject = (config.connector ?? createSubject)();
+      const subject = connector();
       subscribeChild(from(selector(subject.asObservable())), sink);
       if (sink.closed) return;
       subscribeChild(source, sink, {

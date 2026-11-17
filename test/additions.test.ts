@@ -9,6 +9,7 @@ import {
   bindNodeCallback,
   combineLatest,
   connectable,
+  connectableOnce,
   createQueueScheduler,
   createReplaySubject,
   createSubject,
@@ -195,7 +196,7 @@ describe('queueScheduler', () => {
 describe('connectable', () => {
   it('starts on connect() and multicasts', () => {
     // without resetOnDisconnect the replayed values outlive the finished connection
-    const c = connectable(of(1, 2), { connector: () => createReplaySubject<number>(), resetOnDisconnect: false });
+    const c = connectableOnce(of(1, 2), () => createReplaySubject<number>());
     const a: unknown[] = [];
     const b: unknown[] = [];
     c.subscribe((v) => a.push(v));
