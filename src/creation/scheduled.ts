@@ -53,40 +53,36 @@ export const scheduled = <A>(input: ObservableInput<A>, scheduler: Scheduler): O
   return from(input).pipe(subscribeOn<A>(scheduler), observeOn<A>(scheduler));
 };
 
-export interface GenerateOptions<S, A> {
-  readonly initialState: S;
-  /** Keep going while this holds. Default: forever. */
-  readonly condition?: (state: S) => boolean;
-  readonly iterate: (state: S) => S;
-  /** Maps each state to the emitted value. Default: the state itself. */
-  readonly resultSelector?: (state: S) => A;
-  /** Emit one value per scheduler task instead of synchronously. */
-  readonly scheduler?: Scheduler;
-}
-
 /**
- * A `for` loop as an Observable: starting from `initialState`, emits
- * `resultSelector(state)` while `condition(state)` holds, stepping with
- * `iterate`. Pure functions in, values out; see also `unfold`.
+ * A `for` loop as an Observable:
+ *
+ *   for (let state = initial; condition(state); state = iterate(state)) emit(state)
+ *
+ * Pure functions in, values out. Map the states with `map`; for a loop that
+ * runs forever, pass `() => true` and stop it with `take`. See also `unfold`.
+ *
+ * With a `scheduler`, each value is emitted in its own scheduler task
+ * instead of synchronously.
  */
-export function generate<S, A>(options: GenerateOptions<S, A> & { readonly resultSelector: (state: S) => A }): Observable<A>;
-export function generate<S>(options: Omit<GenerateOptions<S, S>, 'resultSelector'>): Observable<S>;
-export function generate<S, A>(options: GenerateOptions<S, A>): Observable<A> {
-  const { initialState, condition, iterate } = options;
-  const select = options.resultSelector ?? ((s: S) => s as unknown as A);
-  const states: Iterable<A> = {
+export const generate = <S>(
+  initial: S,
+  condition: (state: S) => boolean,
+  iterate: (state: S) => S,
+  scheduler?: Scheduler,
+): Observable<S> => {
+  const states: Iterable<S> = {
     [Symbol.iterator]: () => {
-      let state = initialState;
+      let state = initial;
       let started = false;
       return {
-        next: (): IteratorResult<A> => {
+        next: (): IteratorResult<S> => {
           if (started) state = iterate(state);
           started = true;
-          if (condition && !condition(state)) return { done: true, value: undefined };
-          return { done: false, value: select(state) };
+          if (!condition(state)) return { done: true, value: undefined };
+          return { done: false, value: state };
         },
       };
     },
   };
-  return options.scheduler ? scheduleIterable(states, options.scheduler) : from(states);
-}
+  return scheduler ? scheduleIterable(states, scheduler) : from(states);
+};

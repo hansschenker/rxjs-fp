@@ -9,39 +9,31 @@ export interface GroupedObservable<K, A> extends Observable<A> {
   readonly key: K;
 }
 
-export interface GroupByOptions<A, K, E> {
-  /** Maps each value before it enters its group. */
-  readonly element?: (value: A) => E;
-  /** A group completes (and is forgotten) when `duration(group)` emits or ends; a later value with the same key opens a new group. */
-  readonly duration?: (group: GroupedObservable<K, E>) => ObservableInput<unknown>;
-  /** The Subject behind each group. Default: `createSubject`. */
-  readonly connector?: () => Subject<E>;
-}
-
 /**
- * Splits the source into one `GroupedObservable` per key.
+ * Shared by `groupBy` and `groupByUntil`. Splits the source into one
+ * `GroupedObservable` per key.
  *
  * Base case: the first value with a new key emits a new group; that value
  * and all later values with the same key flow into it. Completion and
  * errors of the source reach every open group and the outer Observable.
+ *
+ * With a `duration`, a group completes (and is forgotten) when
+ * `duration(group)` emits or ends; a later value with the same key opens a
+ * new group. `connector` creates the Subject behind each group.
  *
  * Edge case, as in RxJS: unsubscribing from the outer Observable does not
  * stop the source while some group still has subscribers. The source
  * subscription lives in its own scope and is closed only when the outer
  * subscriber is gone *and* no group is subscribed.
  */
-export function groupBy<A, K>(keySelector: (value: A) => K): Operator<A, GroupedObservable<K, A>>;
-export function groupBy<A, K, E = A>(
+function groupByCore<A, K>(
   keySelector: (value: A) => K,
-  options: GroupByOptions<A, K, E> & { readonly element: (value: A) => E },
-): Operator<A, GroupedObservable<K, E>>;
-export function groupBy<A, K>(keySelector: (value: A) => K, options: GroupByOptions<A, K, A>): Operator<A, GroupedObservable<K, A>>;
-export function groupBy<A, K, E>(keySelector: (value: A) => K, options: GroupByOptions<A, K, E> = {}): Operator<A, GroupedObservable<K, E>> {
-  const connector = options.connector ?? createSubject;
-  const element = options.element ?? ((a: A) => a as unknown as E);
+  duration: ((group: GroupedObservable<K, A>) => ObservableInput<unknown>) | undefined,
+  connector: () => Subject<A>,
+): Operator<A, GroupedObservable<K, A>> {
   return (source) =>
-    observable<GroupedObservable<K, E>>((sink) => {
-      const groups = new Map<K, Subject<E>>();
+    observable<GroupedObservable<K, A>>((sink) => {
+      const groups = new Map<K, Subject<A>>();
       const connection = createSubscription();
       let activeGroups = 0;
       let outerGone = false;
@@ -58,9 +50,9 @@ export function groupBy<A, K, E>(keySelector: (value: A) => K, options: GroupByO
       };
       const fail = (e: unknown): void => notify((o) => o.error(e));
 
-      const grouped = (key: K, subject: Subject<E>): GroupedObservable<K, E> =>
+      const grouped = (key: K, subject: Subject<A>): GroupedObservable<K, A> =>
         Object.freeze({
-          ...observable<E>((groupSink) => {
+          ...observable<A>((groupSink) => {
             activeGroups++;
             const inner = subscribeChild(subject, groupSink);
             return () => {
@@ -72,7 +64,7 @@ export function groupBy<A, K, E>(keySelector: (value: A) => K, options: GroupByO
           key,
         });
 
-      const watchDuration = (key: K, subject: Subject<E>, group: GroupedObservable<K, E>): void => {
+      const watchDuration = (key: K, subject: Subject<A>, group: GroupedObservable<K, A>): void => {
         let ended = false;
         let sub: Subscription | null = null;
         const end = (f: () => void): void => {
@@ -82,7 +74,7 @@ export function groupBy<A, K, E>(keySelector: (value: A) => K, options: GroupByO
           sub?.unsubscribe();
           f();
         };
-        sub = subscribeWithin(from((options.duration as NonNullable<typeof options.duration>)(group)), connection, {
+        sub = subscribeWithin(from((duration as NonNullable<typeof duration>)(group)), connection, {
           next: () => end(() => subject.complete()),
           error: (e) => end(() => subject.error(e)),
           complete: () => end(() => subject.complete()),
@@ -105,9 +97,9 @@ export function groupBy<A, K, E>(keySelector: (value: A) => K, options: GroupByO
               groups.set(key, subject);
               const group = grouped(key, subject);
               sink.next(group);
-              if (options.duration) watchDuration(key, subject, group);
+              if (duration) watchDuration(key, subject, group);
             }
-            subject.next(element(a));
+            subject.next(a);
           } catch (e) {
             fail(e);
           }
@@ -117,3 +109,24 @@ export function groupBy<A, K, E>(keySelector: (value: A) => K, options: GroupByO
       });
     });
 }
+
+/**
+ * Splits the source into one `GroupedObservable` per key, as `groupByCore`
+ * describes. `connector` creates the Subject behind each group; pass
+ * `() => createReplaySubject()` to let late subscribers of a group see its
+ * earlier values. To map the values of a group, use `map` on the group.
+ */
+export const groupBy = <A, K>(
+  keySelector: (value: A) => K,
+  connector: () => Subject<A> = createSubject,
+): Operator<A, GroupedObservable<K, A>> => groupByCore(keySelector, undefined, connector);
+
+/**
+ * Like `groupBy`, but each group completes when `duration(group)` emits or
+ * ends, and is forgotten: a later value with the same key opens a new group.
+ */
+export const groupByUntil = <A, K>(
+  keySelector: (value: A) => K,
+  duration: (group: GroupedObservable<K, A>) => ObservableInput<unknown>,
+  connector: () => Subject<A> = createSubject,
+): Operator<A, GroupedObservable<K, A>> => groupByCore(keySelector, duration, connector);

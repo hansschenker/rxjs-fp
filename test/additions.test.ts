@@ -41,18 +41,19 @@ import { runMarbles } from '../src/testing/index.js';
 
 describe('creation', () => {
   it('generate is a for loop', () => {
-    expect(collect(generate({ initialState: 1, condition: (x) => x < 20, iterate: (x) => x * 2 }))).toEqual([1, 2, 4, 8, 16, '|']);
-    const squares = generate({ initialState: 0, condition: (x) => x < 3, iterate: (x) => x + 1, resultSelector: (x) => `${x * x}` });
+    expect(collect(generate(1, (x) => x < 20, (x) => x * 2))).toEqual([1, 2, 4, 8, 16, '|']);
+    // RxJS's resultSelector is a map
+    const squares = generate(0, (x) => x < 3, (x) => x + 1).pipe(map((x) => `${x * x}`));
     expectTypeOf(squares).toEqualTypeOf<Observable<string>>();
     expect(collect(squares)).toEqual(['0', '1', '4', '|']);
-    // infinite without a condition: take(n) stops it
-    expect(collect(generate({ initialState: 0, iterate: (x) => x + 1 }).pipe(take(3)))).toEqual([0, 1, 2, '|']);
+    // a loop that runs forever: take(n) stops it
+    expect(collect(generate(0, () => true, (x) => x + 1).pipe(take(3)))).toEqual([0, 1, 2, '|']);
   });
 
   it('generate and scheduled with a scheduler emit one value per task', () => {
     const s = createVirtualScheduler();
     const out: unknown[] = [];
-    generate({ initialState: 0, condition: (x) => x < 3, iterate: (x) => x + 1, scheduler: s }).subscribe({
+    generate(0, (x) => x < 3, (x) => x + 1, s).subscribe({
       next: (v) => out.push(v),
       complete: () => out.push('|'),
     });
@@ -262,8 +263,16 @@ describe('edge cases of duration selectors', () => {
 
 describe('groupBy', () => {
   it('types the groups', () => {
-    const g = of(1, 2, 3).pipe(groupBy((x) => (x % 2 === 0 ? 'even' : 'odd'), { element: (x) => `${x}` }));
-    expectTypeOf(g).toEqualTypeOf<Observable<GroupedObservable<'even' | 'odd', string>>>();
+    const g = of(1, 2, 3).pipe(groupBy((x) => (x % 2 === 0 ? 'even' : 'odd')));
+    expectTypeOf(g).toEqualTypeOf<Observable<GroupedObservable<'even' | 'odd', number>>>();
+  });
+
+  it('a connector decides the Subject behind each group', () => {
+    const late: number[] = [];
+    of(1, 2, 3)
+      .pipe(groupBy((x) => x % 2, () => createReplaySubject<number>()), toArray())
+      .subscribe((groups) => groups[0]?.subscribe((v) => late.push(v)));
+    expect(late).toEqual([1, 3]);
   });
 
   it('keeps the source alive while a group is still subscribed', () => {

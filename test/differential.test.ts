@@ -178,11 +178,11 @@ describe('higher-order operators match RxJS', () => {
     ours: ({ a }) => a.pipe(fp.groupBy((x) => x < 'c'), fp.mergeMap((g) => g.pipe(fp.map((v) => `${g.key}:${v}`)))),
     theirs: ({ a }) => a.pipe(rx.groupBy((x) => x < 'c'), rx.mergeMap((g) => g.pipe(rx.map((v) => `${g.key}:${v}`)))),
   });
-  prop2('groupBy with element and duration', {
+  prop2('groupByUntil, with element as a map on each group', {
     ours: ({ a, b }) =>
       a.pipe(
-        fp.groupBy((x) => x, { element: (x) => x.toUpperCase(), duration: () => b }),
-        fp.mergeMap((g, i) => g.pipe(fp.map((v) => `${i}${g.key}:${v}`))),
+        fp.groupByUntil((x: string) => x, () => b),
+        fp.mergeMap((g, i) => g.pipe(fp.map((x) => x.toUpperCase()), fp.map((v) => `${i}${g.key}:${v}`))),
       ),
     theirs: ({ a, b }) =>
       a.pipe(
