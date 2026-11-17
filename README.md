@@ -29,7 +29,7 @@ RxJS's implementation has changed shape several times:
 
 `rxjs-fp` takes this one step further. It keeps the semantics pure and puts the unavoidable mutation in one small, audited place per subscription.
 
-## Design in six rules
+## Design in seven rules
 
 1. **An Observable is a frozen record of closures.**
    - `subscribe` means "call the producer". Two subscriptions run it twice, so Observables are cold by default.
@@ -48,6 +48,12 @@ RxJS's implementation has changed shape several times:
 6. **Errors never escape the pipeline.**
    - Exceptions from user functions in operators go to `error`.
    - Exceptions from consumer callbacks are reported on a fresh stack, never re-entered.
+
+7. **Behaviour is chosen by name, not by a config object.**
+   - A choice between variants is a strategy value, with a named operator for each common case: `throttleWith(Trailing)` is also `throttleTrailing`, as `flatMapWith(Switch)` is `switchMap`.
+   - A different behaviour is a different operator: `timeoutFirst`, `bufferTimeOrCount`, `groupByUntil`.
+   - Behaviour passed in is a function argument: a `groupBy` connector, a fallback in `catchTimeout`.
+   - Still to do: `retry`, `share`, `shareReplay` and `connectable` keep their configs for now.
 
 The library source must not contain `class`, `this`, `instanceof`, `.prototype` or `new` on custom types. A test checks this on the TypeScript AST (`test/purity.test.ts`).
 
@@ -69,16 +75,16 @@ Entry points: `rxjs-fp` (core and operators), `rxjs-fp/fp` (Option, Either, type
 | Area | Functions |
 |---|---|
 | **Core** | `observable`, `pipe`, `flow`, `identity`, `noop`, `subscribeChild`, `fromMachine`, `runMachine` |
-| **Creation** | `of`, `from` (Observable, any Subscribable, Promise, iterable, async iterable, array-like), `defer`, `range`, `unfold`, `generate`, `interval`, `timer`, `iif`, `using`, `scheduled`, `fromEvent` (typed for DOM and Node emitters), `fromEventPattern`, `bindCallback`, `bindNodeCallback`, `animationFrames`, `EMPTY`, `NEVER`, `throwError` |
+| **Creation** | `of`, `from` (Observable, any Subscribable, Promise, iterable, async iterable, array-like), `defer`, `range`, `unfold`, `generate(initial, condition, iterate)`, `interval`, `timer`, `iif`, `using`, `scheduled`, `fromEvent` (typed for DOM and Node emitters), `fromEventPattern`, `bindCallback`, `bindNodeCallback`, `animationFrames`, `EMPTY`, `NEVER`, `throwError` |
 | **Transformation** | `map`, `as`, `scan`, `reduce`, `pairwise`, `tap`, `toArray`, `count`, `max`, `min`, `defaultIfEmpty`, `materialize`/`dematerialize` (notifications as data), `timestamp`, `timeInterval` |
-| **Buffering / windowing** | `buffer`, `bufferCount`, `bufferTime`, `bufferToggle`, `bufferWhen`, `window`, `windowCount`, `windowTime`, `windowToggle`, `windowWhen` |
-| **Grouping** | `groupBy` (with `element`, `duration`, `connector`), `partition` |
+| **Buffering / windowing** | `buffer`, `bufferCount`, `bufferTime` (+ `Every`, `OrCount`, `EveryOrCount`), `bufferToggle`, `bufferWhen`, `window`, `windowCount`, `windowTime` (+ `Every`, `OrCount`, `EveryOrCount`), `windowToggle`, `windowWhen` |
+| **Grouping** | `groupBy`, `groupByUntil` (both with an optional `connector`), `partition` |
 | **Filtering** | `filter` (with refinements), `filterMap`, `take`, `takeLast`, `skip`, `skipLast`, `takeWhile`, `skipWhile`, `distinct`, `distinctUntilChanged`, `distinctUntilKeyChanged`, `first`, `last`, `single`, `elementAt`, `ignoreElements`, `takeUntil`, `skipUntil` |
 | **Conditional** | `every`, `find`, `findIndex`, `isEmpty`, `sequenceEqual`, `throwIfEmpty`, `defaultIfEmpty` |
 | **Flattening** | `flatMapWith(strategy)`, `mergeMap`, `concatMap`, `switchMap`, `exhaustMap`, `*All`, `expand`, `mergeScan`, `switchScan` |
 | **Combination** | `merge`, `concat`, `combineLatest`, `zip`, `forkJoin` (all tuple-typed), `race`, `onErrorResumeNext`, `withLatestFrom`, `startWith`, `endWith`, `*With` (incl. `raceWith`, `onErrorResumeNextWith`), `combineLatestAll`, `zipAll` |
-| **Time** | `delay`, `delayWhen`, `debounceTime`, `debounce`, `throttleTime`, `throttle`, `auditTime`, `audit`, `sampleTime`, `sample`, `timeout` (ms, or `{ each, first, with }`), `subscribeOn`, `observeOn` |
-| **Errors** | `catchError`, `retry` (count / delay / reset), `repeat`, `finalize`, `onErrorReturn`; error values `emptyError`, `timeoutError`, `notFoundError`, `sequenceError`, … with `is*` guards |
+| **Time** | `delay`, `delayWhen`, `debounceTime`, `debounce`, `throttle` and `throttleTime` (+ `Trailing`, `LeadingAndTrailing`; `throttleWith`, `throttleTimeWith`), `auditTime`, `audit`, `sampleTime`, `sample`, `timeout`, `timeoutFirst`, `timeoutFirstAndEach`, `subscribeOn`, `observeOn` |
+| **Errors** | `catchError`, `catchTimeout`, `retry` (count / delay / reset), `repeat`, `finalize`, `onErrorReturn`; error values `emptyError`, `timeoutError`, `notFoundError`, `sequenceError`, … with `is*` guards |
 | **Multicasting** | `createSubject`, `createBehaviorSubject`, `createReplaySubject`, `createAsyncSubject`, `share`, `shareReplay`, `connectable`, `connect` |
 | **Conversion** | `firstValueFrom`, `lastValueFrom`, `toAsyncIterable` |
 | **Schedulers** | `asyncScheduler`, `asapScheduler`, `queueScheduler` (trampoline), `animationFrameScheduler`, `createVirtualScheduler` |
@@ -87,12 +93,27 @@ Entry points: `rxjs-fp` (core and operators), `rxjs-fp/fp` (Option, Either, type
 
 Every non-deprecated RxJS 7.8 function has an rxjs-fp counterpart. Each operator added to close that gap is checked against RxJS itself: `test/differential.test.ts` feeds the same random marble diagrams to both libraries on virtual time and requires identical notifications at identical frames.
 
-Left out on purpose, because RxJS 7 deprecates them and RxJS 8 removes them: `multicast`, `publish*`, `refCount` (use `share` or `connectable`), `pluck`, `mapTo` (use `map`, `as`), `*MapTo`, `flatMap`, `exhaust`, `combineAll`, `pairs`, `retryWhen`, `repeatWhen`, `timeoutWith` (use `timeout({ with })`), and the class exports.
+Left out on purpose, because RxJS 7 deprecates them and RxJS 8 removes them: `multicast`, `publish*`, `refCount` (use `share` or `connectable`), `pluck`, `mapTo` (use `map`, `as`), `*MapTo`, `flatMap`, `exhaust`, `combineAll`, `pairs`, `retryWhen`, `repeatWhen`, `timeoutWith` (use `timeout` and `catchTimeout`), and the class exports.
 
 Known differences:
 - **`combineLatest`** (deliberate) completes as soon as one input completes without having emitted, because no combination can ever be produced. RxJS waits for the other inputs to complete. `combineLatestAll` inherits this.
 - **`windowToggle`**: an error from `openings` also errors the open windows.
-- Time operators take the scheduler as an argument instead of RxJS's positional overloads: `bufferTime(span, scheduler, { creationInterval, maxBufferSize })`, `windowTime(span, scheduler, { creationInterval, maxWindowSize })`.
+- **No config objects** for `throttle`, `throttleTime`, `timeout`, `bufferTime`, `windowTime`, `groupBy` and `generate` (rule 7). Each RxJS config maps to a named operator, and the differential tests check that pair against RxJS:
+
+  | RxJS 7 | rxjs-fp |
+  |---|---|
+  | `throttle(d, { leading: false, trailing: true })` | `throttleTrailing(d)` |
+  | `throttle(d, { leading: true, trailing: true })` | `throttleLeadingAndTrailing(d)` |
+  | `timeout({ first })` | `timeoutFirst(first)` |
+  | `timeout({ first, each })` | `timeoutFirstAndEach(first, each)` |
+  | `timeout({ each, with })` | `timeout(each)` then `catchTimeout(with)` |
+  | `bufferTime(span, interval)` | `bufferTimeEvery(span, interval)` |
+  | `bufferTime(span, null, max)` | `bufferTimeOrCount(span, max)` |
+  | `groupBy(key, { duration })` | `groupByUntil(key, duration)` |
+  | `groupBy(key, { element })` | `groupBy(key)`, then `map(element)` on each group |
+  | `generate({ initialState, condition, iterate, resultSelector })` | `generate(initial, condition, iterate)`, then `map(resultSelector)` |
+
+- Time operators take the scheduler as their last argument, never inside a config.
 
 ## Writing an operator
 

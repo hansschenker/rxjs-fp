@@ -756,11 +756,11 @@ Three further creation modules sit beside `creation.ts` and are worth placing:
   and array-likes emit one value per scheduler task; anything already Observable-like is routed
   through `from(input).pipe(subscribeOn(scheduler), observeOn(scheduler))` — a derivation rather
   than a reimplementation, which is only possible because both are ordinary operators.
-- **`generate(options)`** is the imperative `for` loop as an Observable (`initialState`, `condition`,
-  `iterate`, `resultSelector`), and it is the interesting counterpart to `unfold` below: same
-  expressive power, opposite ergonomics. `unfold` is the categorical anamorphism with one function
-  returning `Option<[value, nextSeed]>`; `generate` is the loop a JavaScript developer already knows,
-  spelled as four fields. Shipping both is a deliberate concession that the honest FP formulation is
+- **`generate(initial, condition, iterate)`** is the imperative `for` loop as an Observable, its
+  three arguments in the order of a `for` header; map the states with `map`. It is the interesting
+  counterpart to `unfold` below: same expressive power, opposite ergonomics. `unfold` is the
+  categorical anamorphism with one function returning `Option<[value, nextSeed]>`; `generate` is
+  the loop a JavaScript developer already knows, spelled as three arguments. Shipping both is a deliberate concession that the honest FP formulation is
   not always the teachable one.
 - **`bindCallback` / `bindNodeCallback`** (`src/creation/bind.ts`) wrap callback-style APIs, with a
   `CallbackResult` conditional type that collapses zero arguments to `void`, one to the value itself,
