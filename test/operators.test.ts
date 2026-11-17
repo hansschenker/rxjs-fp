@@ -43,6 +43,11 @@ import {
   takeUntil,
   takeWhile,
   throttleTime,
+  throttleTimeLeadingAndTrailing,
+  throttleTimeTrailing,
+  throttleTimeWith,
+  Leading,
+  Trailing,
   throwError,
   timeout,
   toArray,
@@ -253,6 +258,27 @@ describe('time (virtual scheduler, injected)', () => {
   it('throttleTime (leading)', () => {
     runMarbles(({ cold, scheduler, expectObservable }) => {
       expectObservable(cold('abc---de|').pipe(throttleTime(3, scheduler))).toBe('a-----d-|');
+    });
+  });
+
+  // Expected marbles computed with RxJS 7 throttleTime and the matching config.
+  it('throttleTimeTrailing', () => {
+    runMarbles(({ cold, scheduler, expectObservable }) => {
+      expectObservable(cold('abc---de|').pipe(throttleTimeTrailing(3, scheduler))).toBe('---c--d--(e|)');
+    });
+  });
+
+  it('throttleTimeLeadingAndTrailing', () => {
+    runMarbles(({ cold, scheduler, expectObservable }) => {
+      expectObservable(cold('abc---de|').pipe(throttleTimeLeadingAndTrailing(3, scheduler))).toBe('a--c--d--(e|)');
+    });
+  });
+
+  it('throttleTimeWith takes the strategy as a value', () => {
+    const pick = (trailing: boolean) => throttleTimeWith(trailing ? Trailing : Leading);
+    runMarbles(({ cold, scheduler, expectObservable }) => {
+      expectObservable(cold('abc---de|').pipe(pick(true)<string>(3, scheduler))).toBe('---c--d--(e|)');
+      expectObservable(cold('abc---de|').pipe(pick(false)<string>(3, scheduler))).toBe('a-----d-|');
     });
   });
 

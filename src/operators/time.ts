@@ -85,22 +85,44 @@ export const debounceTime =
       };
     });
 
-export interface ThrottleConfig {
-  readonly leading?: boolean;
-  readonly trailing?: boolean;
-}
+/**
+ * Which values a throttle window lets through. Strategies are data, as for
+ * `flatMapWith`:
+ *
+ *   Leading             the first value of a window, then nothing until it ends
+ *   Trailing            the last value seen during a window, when it ends
+ *   LeadingAndTrailing  both: the first value at once, the last one when it ends
+ *
+ * Pass one to `throttleWith` or `throttleTimeWith`, or use the named
+ * operators: `throttle`, `throttleTrailing`, `throttleLeadingAndTrailing`, and
+ * the `throttleTime…` equivalents.
+ */
+export type ThrottleStrategy =
+  | { readonly _tag: 'Leading' }
+  | { readonly _tag: 'Trailing' }
+  | { readonly _tag: 'LeadingAndTrailing' };
+
+export const Leading: ThrottleStrategy = Object.freeze({ _tag: 'Leading' });
+export const Trailing: ThrottleStrategy = Object.freeze({ _tag: 'Trailing' });
+export const LeadingAndTrailing: ThrottleStrategy = Object.freeze({ _tag: 'LeadingAndTrailing' });
+
+const throttleEdges = (strategy: ThrottleStrategy): { readonly leading: boolean; readonly trailing: boolean } => ({
+  leading: strategy._tag !== 'Trailing',
+  trailing: strategy._tag !== 'Leading',
+});
 
 /**
- * Emits a value, then ignores values for `ms` (leading by default). With
- * `trailing`, the last value seen during a window is emitted when it ends;
- * a pending trailing value delays completion until then.
+ * Lets values through in windows of `ms`, as the `strategy` says. With a
+ * trailing strategy, a pending trailing value delays completion until its
+ * window ends. Usually used through `throttleTime`, `throttleTimeTrailing`
+ * or `throttleTimeLeadingAndTrailing`.
  */
-export const throttleTime =
-  <A>(ms: number, scheduler: Scheduler = asyncScheduler, config: ThrottleConfig = {}): Operator<A, A> =>
+export const throttleTimeWith =
+  (strategy: ThrottleStrategy) =>
+  <A>(ms: number, scheduler: Scheduler = asyncScheduler): Operator<A, A> =>
   (source) =>
     observable((sink) => {
-      const leading = config.leading ?? true;
-      const trailing = config.trailing ?? false;
+      const { leading, trailing } = throttleEdges(strategy);
       let throttling = false;
       let cancel: Teardown = noop;
       let hasTrailing = false;
@@ -149,6 +171,13 @@ export const throttleTime =
         cancel();
       };
     });
+
+/** Emits a value, then ignores values for `ms`. */
+export const throttleTime = throttleTimeWith(Leading);
+/** Emits the last value of each `ms` window when the window ends. */
+export const throttleTimeTrailing = throttleTimeWith(Trailing);
+/** Emits the first value of each `ms` window at once, and the last one when the window ends. */
+export const throttleTimeLeadingAndTrailing = throttleTimeWith(LeadingAndTrailing);
 
 /**
  * After a value arrives, waits `ms` and then emits the most recent value.
@@ -421,16 +450,16 @@ export const debounce =
     });
 
 /**
- * Like `throttleTime`, but each throttle window lasts until
- * `durationSelector(value)` emits. Leading by default; with `trailing`, the
- * last value seen during a window is emitted when it ends.
+ * Like `throttleTimeWith`, but each window lasts until
+ * `durationSelector(value)` emits. Usually used through `throttle`,
+ * `throttleTrailing` or `throttleLeadingAndTrailing`.
  */
-export const throttle =
-  <A>(durationSelector: (value: A) => ObservableInput<unknown>, config: ThrottleConfig = {}): Operator<A, A> =>
+export const throttleWith =
+  (strategy: ThrottleStrategy) =>
+  <A>(durationSelector: (value: A) => ObservableInput<unknown>): Operator<A, A> =>
   (source) =>
     observable<A>((sink) => {
-      const leading = config.leading ?? true;
-      const trailing = config.trailing ?? false;
+      const { leading, trailing } = throttleEdges(strategy);
       let has = false;
       let sendValue: A | undefined;
       let throttled: Inner | null = null;
@@ -477,6 +506,13 @@ export const throttle =
         },
       });
     });
+
+/** Emits a value, then ignores values until `durationSelector(value)` emits. */
+export const throttle = throttleWith(Leading);
+/** Emits the last value of each window when `durationSelector(value)` emits. */
+export const throttleTrailing = throttleWith(Trailing);
+/** Emits the first value of each window at once, and the last one when the window ends. */
+export const throttleLeadingAndTrailing = throttleWith(LeadingAndTrailing);
 
 /** Emits the most recent source value whenever `notifier` emits (if a new one arrived since). */
 export const sample =

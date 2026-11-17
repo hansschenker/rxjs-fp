@@ -78,11 +78,11 @@ describe('duration-selector operators match RxJS', () => {
   prop2('debounce', { ours: ({ a, b }) => a.pipe(fp.debounce(() => b)), theirs: ({ a, b }) => a.pipe(rx.debounce(() => b)) });
   prop2('throttle (leading)', { ours: ({ a, b }) => a.pipe(fp.throttle(() => b)), theirs: ({ a, b }) => a.pipe(rx.throttle(() => b)) });
   prop2('throttle (trailing)', {
-    ours: ({ a, b }) => a.pipe(fp.throttle(() => b, { leading: false, trailing: true })),
+    ours: ({ a, b }) => a.pipe(fp.throttleTrailing(() => b)),
     theirs: ({ a, b }) => a.pipe(rx.throttle(() => b, { leading: false, trailing: true })),
   });
   prop2('throttle (leading + trailing)', {
-    ours: ({ a, b }) => a.pipe(fp.throttle(() => b, { leading: true, trailing: true })),
+    ours: ({ a, b }) => a.pipe(fp.throttleLeadingAndTrailing(() => b)),
     theirs: ({ a, b }) => a.pipe(rx.throttle(() => b, { leading: true, trailing: true })),
   });
   prop2('sample', { ours: ({ a, b }) => a.pipe(fp.sample(b)), theirs: ({ a, b }) => a.pipe(rx.sample(b)) });

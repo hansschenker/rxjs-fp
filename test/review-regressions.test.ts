@@ -21,6 +21,7 @@ import {
   switchMap,
   take,
   throttleTime,
+  throttleTimeLeadingAndTrailing,
   unfold,
   type Observable,
 } from '../src/index.js';
@@ -110,7 +111,7 @@ describe('time operators', () => {
       vs.schedule(() => sink.next(2), 2);
       vs.schedule(() => sink.complete(), 4);
     });
-    const out = record(src.pipe(throttleTime(10, vs, { leading: true, trailing: true })), vs);
+    const out = record(src.pipe(throttleTimeLeadingAndTrailing(10, vs)), vs);
     vs.flush();
     expect(out).toEqual([
       { frame: 0, kind: 'N', value: 1 },
