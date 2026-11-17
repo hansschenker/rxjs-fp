@@ -35,44 +35,77 @@ export const catchError =
 export const catchTimeout = <A, B>(handler: (info: TimeoutInfo<A>) => ObservableInput<B>): Operator<A, A | B> =>
   catchError<A, B>((err) => (isTimeoutError(err) ? handler(err.info as TimeoutInfo<A>) : throwError(() => err)));
 
-export interface RetryConfig {
-  /** Maximum number of resubscriptions. Default: infinite. */
-  readonly count?: number;
-  /** Delay before resubscribing: ms, or a function of (error, attempt). */
-  readonly delay?: number | ((error: unknown, attempt: number) => number);
-  /** Reset the attempt counter after a successful value. Default: false. */
-  readonly resetOnSuccess?: boolean;
-  readonly scheduler?: Scheduler;
-}
+/**
+ * What a retry policy decides after an error. Decisions are data, like
+ * flattening and throttle strategies:
+ *
+ *   retryNow       resubscribe at once, synchronously
+ *   retryAfter(ms) resubscribe after `ms`, on the scheduler
+ *   giveUp         pass the error on
+ */
+export type RetryDecision =
+  | { readonly _tag: 'RetryNow' }
+  | { readonly _tag: 'RetryAfter'; readonly ms: number }
+  | { readonly _tag: 'GiveUp' };
 
-/** Resubscribes to the source when it errors, up to `count` times. */
-export const retry =
-  <A>(config: number | RetryConfig = {}): Operator<A, A> =>
+export const retryNow: RetryDecision = Object.freeze({ _tag: 'RetryNow' });
+export const retryAfter = (ms: number): RetryDecision => Object.freeze({ _tag: 'RetryAfter', ms });
+export const giveUp: RetryDecision = Object.freeze({ _tag: 'GiveUp' });
+
+/**
+ * A pure function from an error and the number of the retry being decided
+ * (1 for the first) to a decision. Testable without any Observable:
+ * `policy(new Error('x'), 1)`.
+ */
+export type RetryPolicy = (error: unknown, attempt: number) => RetryDecision;
+
+/** Retries at once, up to `count` times. */
+export const times =
+  (count: number): RetryPolicy =>
+  (_error, attempt) =>
+    attempt <= count ? retryNow : giveUp;
+
+/** Retries up to `count` times, waiting `ms` before each retry. */
+export const timesWithDelay =
+  (count: number, ms: number): RetryPolicy =>
+  (_error, attempt) =>
+    attempt <= count ? retryAfter(ms) : giveUp;
+
+/** Retries up to `count` times, waiting `initialMs`, then twice as long before each further retry. */
+export const exponentialBackoff =
+  (count: number, initialMs: number): RetryPolicy =>
+  (_error, attempt) =>
+    attempt <= count ? retryAfter(initialMs * 2 ** (attempt - 1)) : giveUp;
+
+/**
+ * Shared by `retryWith` and `retryConsecutiveWith`. On an error, asks the
+ * policy and resubscribes to the source, or passes the error on. With
+ * `resetOnValue`, every value resets the attempt counter, so the policy
+ * sees the number of consecutive failures.
+ */
+const retryCore =
+  <A>(policy: RetryPolicy, resetOnValue: boolean, scheduler: Scheduler): Operator<A, A> =>
   (source) =>
     observable<A>((sink) => {
-      const cfg: RetryConfig = typeof config === 'number' ? { count: config } : config;
-      const max = cfg.count ?? Number.POSITIVE_INFINITY;
-      const scheduler = cfg.scheduler ?? asyncScheduler;
       let attempt = 0;
       let current: Subscription | null = null;
       let cancelDelay: Teardown | null = null;
-
       const subscribe = (): void => {
         current = subscribeChild(source, sink, {
           next: (a) => {
-            if (cfg.resetOnSuccess) attempt = 0;
+            if (resetOnValue) attempt = 0;
             sink.next(a);
           },
           error: (err) => {
-            if (attempt >= max) {
+            attempt++;
+            const decision = policy(err, attempt);
+            if (decision._tag === 'GiveUp') {
               sink.error(err);
               return;
             }
-            attempt++;
             current?.unsubscribe();
-            const d = typeof cfg.delay === 'function' ? cfg.delay(err, attempt) : cfg.delay;
-            if (d === undefined) subscribe();
-            else cancelDelay = scheduler.schedule(subscribe, d);
+            if (decision._tag === 'RetryNow') subscribe();
+            else cancelDelay = scheduler.schedule(subscribe, decision.ms);
           },
         });
       };
@@ -82,6 +115,28 @@ export const retry =
         current?.unsubscribe();
       };
     });
+
+/**
+ * Resubscribes to the source when it errors, as `policy` decides. The
+ * attempt counter counts every failure since subscription.
+ *
+ *   source.pipe(retryWith(timesWithDelay(3, 1000)))
+ *   source.pipe(retryWith((e, n) => (isNetworkError(e) && n <= 3 ? retryAfter(1000) : giveUp)))
+ */
+export const retryWith = <A>(policy: RetryPolicy, scheduler: Scheduler = asyncScheduler): Operator<A, A> =>
+  retryCore<A>(policy, false, scheduler);
+
+/**
+ * Like `retryWith`, but every value resets the attempt counter, so the
+ * policy limits consecutive failures. Suits long-lived connections:
+ *
+ *   socket$.pipe(retryConsecutiveWith(exponentialBackoff(5, 100)))
+ */
+export const retryConsecutiveWith = <A>(policy: RetryPolicy, scheduler: Scheduler = asyncScheduler): Operator<A, A> =>
+  retryCore<A>(policy, true, scheduler);
+
+/** Resubscribes at once when the source errors, up to `count` times (default: forever). */
+export const retry = <A>(count: number = Number.POSITIVE_INFINITY): Operator<A, A> => retryWith<A>(times(count));
 
 /** Resubscribes on completion, `count` times in total (default: forever). */
 export const repeat =

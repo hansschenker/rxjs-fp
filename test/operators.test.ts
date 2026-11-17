@@ -33,7 +33,17 @@ import {
   race,
   reduce,
   repeat,
+  observable,
   retry,
+  retryWith,
+  retryConsecutiveWith,
+  retryNow,
+  retryAfter,
+  giveUp,
+  times,
+  timesWithDelay,
+  exponentialBackoff,
+  type RetryPolicy,
   scan,
   skip,
   skipWhile,
@@ -362,8 +372,44 @@ describe('error handling', () => {
 
   it('retry with delay uses the scheduler', () => {
     runMarbles(({ cold, scheduler, expectObservable }) => {
-      expectObservable(cold('a#').pipe(retry({ count: 1, delay: 2, scheduler }))).toBe('a--a#');
+      expectObservable(cold('a#').pipe(retryWith(timesWithDelay(1, 2), scheduler))).toBe('a--a#');
     });
+  });
+
+  it('retry policies are pure functions', () => {
+    const err = new Error('x');
+    expect(times(2)(err, 2)).toBe(retryNow);
+    expect(times(2)(err, 3)).toBe(giveUp);
+    expect(exponentialBackoff(3, 100)(err, 3)).toEqual(retryAfter(400));
+    expect(exponentialBackoff(3, 100)(err, 4)).toBe(giveUp);
+  });
+
+  it('retryWith retries only the errors the policy accepts', () => {
+    const transient = new Error('transient');
+    const fatal = new Error('fatal');
+    const onlyTransient: RetryPolicy = (e, n) => (e === transient && n <= 5 ? retryNow : giveUp);
+    runMarbles(({ cold, expectObservable }) => {
+      expectObservable(cold('a#', undefined, transient).pipe(retryWith(times(1)))).toBe('aa#', undefined, transient);
+      expectObservable(cold('a#', undefined, fatal).pipe(retryWith(onlyTransient))).toBe('a#', undefined, fatal);
+    });
+  });
+
+  it('retryConsecutiveWith resets the counter after a value', () => {
+    // Every subscription emits one value, then fails: never two failures in a row.
+    let subscriptions = 0;
+    const flaky = observable<number>((sink) => {
+      subscriptions++;
+      sink.next(subscriptions);
+      sink.error(new Error('flaky'));
+    });
+    const out: unknown[] = [];
+    flaky.pipe(retryConsecutiveWith(times(1)), take(3)).subscribe({ next: (v) => out.push(v), error: () => out.push('#') });
+    expect(out).toEqual([1, 2, 3]);
+    // retryWith counts every failure, so times(1) allows one retry in total.
+    subscriptions = 0;
+    const out2: unknown[] = [];
+    flaky.pipe(retryWith(times(1)), take(3)).subscribe({ next: (v) => out2.push(v), error: () => out2.push('#') });
+    expect(out2).toEqual([1, 2, '#']);
   });
 
   it('repeat resubscribes on completion', () => {

@@ -103,6 +103,18 @@ describe('duration-selector operators match RxJS', () => {
     ours: ({ a }, s) => a.pipe(fp.timeout(2, s), fp.catchTimeout((i) => fp.of(`seen${i.seen}`))),
     theirs: ({ a }) => a.pipe(rx.timeout({ each: 2, with: (i) => rx.of(`seen${i.seen}`) })),
   });
+  prop1('retryWith(timesWithDelay) vs retry({ count, delay })', {
+    ours: ({ a }, s) => a.pipe(fp.retryWith(fp.timesWithDelay(2, 3), s), fp.take(12)),
+    theirs: ({ a }) => a.pipe(rx.retry({ count: 2, delay: 3 }), rx.take(12)),
+  });
+  prop1('retryConsecutiveWith(times) vs retry({ count, resetOnSuccess })', {
+    ours: ({ a }) => a.pipe(fp.retryConsecutiveWith(fp.times(1)), fp.take(12)),
+    theirs: ({ a }) => a.pipe(rx.retry({ count: 1, resetOnSuccess: true }), rx.take(12)),
+  });
+  prop1('retryWith(exponentialBackoff) vs retry({ count, delay: fn })', {
+    ours: ({ a }, s) => a.pipe(fp.retryWith(fp.exponentialBackoff(3, 1), s), fp.take(12)),
+    theirs: ({ a }) => a.pipe(rx.retry({ count: 3, delay: (_e, n) => rx.timer(2 ** (n - 1)) }), rx.take(12)),
+  });
   prop1('timeout config: first and each', {
     ours: ({ a }, s) => a.pipe(fp.timeoutFirstAndEach(4, 2, s)),
     theirs: ({ a }) => a.pipe(rx.timeout({ first: 4, each: 2 })),
