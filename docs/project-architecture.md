@@ -510,14 +510,14 @@ calls itself:
 ```ts
 const subscribe = (): void => {
   current = subscribeChild(source, sink, {
-    next: (a) => { if (cfg.resetOnSuccess) attempt = 0; sink.next(a); },
+    next: (a) => { if (resetOnValue) attempt = 0; sink.next(a); },
     error: (err) => {
-      if (attempt >= max) { sink.error(err); return; }
       attempt++;
+      const decision = policy(err, attempt);
+      if (decision._tag === 'GiveUp') { sink.error(err); return; }
       current?.unsubscribe();
-      const d = typeof cfg.delay === 'function' ? cfg.delay(err, attempt) : cfg.delay;
-      if (d === undefined) subscribe();
-      else cancelDelay = scheduler.schedule(subscribe, d);
+      if (decision._tag === 'RetryNow') subscribe();
+      else cancelDelay = scheduler.schedule(subscribe, decision.ms);
     },
   });
 };
@@ -851,15 +851,14 @@ during that synchronous run sees a non-null `connection` and does not open a sec
 `subscribeWithin` (§3.3) is used rather than a bare `subscribe` so that closing the connection scope
 stops even a synchronous source.
 
-`shareReplay` is then not a separate implementation but a configuration:
+The code above is the internal `shareCore`, and the public operators choose its reset flags through
+a lifecycle value: `WhileSubscribed` (start over after an error, after completion, and when the last
+subscriber leaves) or `Cached` (start over only after an error). `shareReplay` is then not a separate
+implementation but a choice of connector and lifecycle:
 
 ```ts
-share<A>({
-  connector: () => createReplaySubject<A>(cfg.bufferSize, cfg.windowTime, cfg.scheduler),
-  resetOnError: true,
-  resetOnComplete: false,
-  resetOnRefCountZero: cfg.refCount ?? false,
-})
+export const shareReplay = <A>(bufferSize = Number.POSITIVE_INFINITY): Operator<A, A> =>
+  shareWith<A>(() => createReplaySubject<A>(bufferSize), Cached);
 ```
 
 Policy as data again — the same move as `FlattenStrategy`, applied to multicasting.
@@ -1180,7 +1179,7 @@ Then the invariants, each with the place that enforces it:
 | `generate` / `bindCallback` / `bindNodeCallback` / `scheduled` | plain functions; `scheduled` derives from `subscribeOn` + `observeOn` | `src/creation/scheduled.ts`, `bind.ts` |
 | `class Subject extends Observable implements Observer` | `createSubject()` → record of closures over an observer `Set` | `src/subject/subject.ts` |
 | `BehaviorSubject`/`ReplaySubject`/`AsyncSubject` overriding `_subscribe` | `makeSubject({ onNext, onSubscribe })` hooks | `src/subject/subject.ts:35` |
-| `class ConnectableObservable` + `multicast`/`refCount` | `share(config)`; `shareReplay` = `share` with a replay connector | `src/subject/subject.ts:237` |
+| `class ConnectableObservable` + `multicast`/`refCount` | `shareWith(connector, lifecycle)`; `share`, `shareReplay`, `shareLatest` are choices of connector and lifecycle | `src/subject/subject.ts:245` |
 | `class EmptyError extends Error` et al. | `tagged(name, msg)` + `name`-based guards | `src/core/errors.ts` |
 | `instanceof Observable` | `isObservable` via a `Symbol.for` brand | `src/core/types.ts:63` |
 | `instanceof` dispatch in `from` | capability checks (`then`, `Symbol.iterator`, `subscribe`, …) | `src/creation/creation.ts:165` |

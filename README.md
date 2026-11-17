@@ -52,8 +52,9 @@ RxJS's implementation has changed shape several times:
 7. **Behaviour is chosen by name, not by a config object.**
    - A choice between variants is a strategy value, with a named operator for each common case: `throttleWith(Trailing)` is also `throttleTrailing`, as `flatMapWith(Switch)` is `switchMap`.
    - A different behaviour is a different operator: `timeoutFirst`, `bufferTimeOrCount`, `groupByUntil`.
-   - Behaviour passed in is a function argument: a `groupBy` connector, a fallback in `catchTimeout`.
-   - Still to do: `retry`, `share`, `shareReplay` and `connectable` keep their configs for now.
+   - Behaviour passed in is a function argument: a `groupBy` connector, a fallback in `catchTimeout`, a retry policy.
+   - A decision is a pure function returning data: a retry policy `(error, attempt) => retryNow | retryAfter(ms) | giveUp`.
+   - No operator takes a config object. Still open outside the operators: `firstValueFrom` and `lastValueFrom` accept `{ defaultValue }`.
 
 The library source must not contain `class`, `this`, `instanceof`, `.prototype` or `new` on custom types. A test checks this on the TypeScript AST (`test/purity.test.ts`).
 
@@ -84,8 +85,8 @@ Entry points: `rxjs-fp` (core and operators), `rxjs-fp/fp` (Option, Either, type
 | **Flattening** | `flatMapWith(strategy)`, `mergeMap`, `concatMap`, `switchMap`, `exhaustMap`, `*All`, `expand`, `mergeScan`, `switchScan` |
 | **Combination** | `merge`, `concat`, `combineLatest`, `zip`, `forkJoin` (all tuple-typed), `race`, `onErrorResumeNext`, `withLatestFrom`, `startWith`, `endWith`, `*With` (incl. `raceWith`, `onErrorResumeNextWith`), `combineLatestAll`, `zipAll` |
 | **Time** | `delay`, `delayWhen`, `debounceTime`, `debounce`, `throttle` and `throttleTime` (+ `Trailing`, `LeadingAndTrailing`; `throttleWith`, `throttleTimeWith`), `auditTime`, `audit`, `sampleTime`, `sample`, `timeout`, `timeoutFirst`, `timeoutFirstAndEach`, `subscribeOn`, `observeOn` |
-| **Errors** | `catchError`, `catchTimeout`, `retry` (count / delay / reset), `repeat`, `finalize`, `onErrorReturn`; error values `emptyError`, `timeoutError`, `notFoundError`, `sequenceError`, … with `is*` guards |
-| **Multicasting** | `createSubject`, `createBehaviorSubject`, `createReplaySubject`, `createAsyncSubject`, `share`, `shareReplay`, `connectable`, `connect` |
+| **Errors** | `catchError`, `catchTimeout`, `retry`, `retryWith` and `retryConsecutiveWith` (with policies `times`, `timesWithDelay`, `exponentialBackoff`), `repeat`, `finalize`, `onErrorReturn`; error values `emptyError`, `timeoutError`, `notFoundError`, `sequenceError`, … with `is*` guards |
+| **Multicasting** | `createSubject`, `createBehaviorSubject`, `createReplaySubject`, `createAsyncSubject`, `share`, `shareReplay`, `shareLatest`, `shareWith(connector, WhileSubscribed | Cached)`, `connectable`, `connectableOnce`, `connect` |
 | **Conversion** | `firstValueFrom`, `lastValueFrom`, `toAsyncIterable` |
 | **Schedulers** | `asyncScheduler`, `asapScheduler`, `queueScheduler` (trampoline), `animationFrameScheduler`, `createVirtualScheduler` |
 
@@ -98,7 +99,7 @@ Left out on purpose, because RxJS 7 deprecates them and RxJS 8 removes them: `mu
 Known differences:
 - **`combineLatest`** (deliberate) completes as soon as one input completes without having emitted, because no combination can ever be produced. RxJS waits for the other inputs to complete. `combineLatestAll` inherits this.
 - **`windowToggle`**: an error from `openings` also errors the open windows.
-- **No config objects** for `throttle`, `throttleTime`, `timeout`, `bufferTime`, `windowTime`, `groupBy` and `generate` (rule 7). Each RxJS config maps to a named operator, and the differential tests check that pair against RxJS:
+- **No config objects** (rule 7). Each RxJS config maps to a named operator, and the differential tests check that pair against RxJS:
 
   | RxJS 7 | rxjs-fp |
   |---|---|
@@ -112,6 +113,15 @@ Known differences:
   | `groupBy(key, { duration })` | `groupByUntil(key, duration)` |
   | `groupBy(key, { element })` | `groupBy(key)`, then `map(element)` on each group |
   | `generate({ initialState, condition, iterate, resultSelector })` | `generate(initial, condition, iterate)`, then `map(resultSelector)` |
+  | `retry({ count, delay })` | `retryWith(timesWithDelay(count, delay))` |
+  | `retry({ count, delay: (e, n) => timer(…) })` | `retryWith((e, n) => …)`, a policy returning `retryAfter(ms)` or `giveUp` |
+  | `retry({ count, resetOnSuccess: true })` | `retryConsecutiveWith(times(count))` |
+  | `share({ connector })` | `shareWith(connector, WhileSubscribed)` |
+  | `share({ connector: () => new ReplaySubject(1) })` | `shareLatest()` |
+  | `shareReplay({ bufferSize, windowTime })` | `shareWith(() => createReplaySubject(bufferSize, windowTime), Cached)` |
+  | `connectable(source, { resetOnDisconnect: false })` | `connectableOnce(source)` |
+
+  Edge case: RxJS's `shareReplay({ refCount: true })` keeps its replay buffer after the source completes but disconnects when nobody listens. That combination has no lifecycle value; `shareLatest()` covers it for sources that never complete, such as state streams.
 
 - Time operators take the scheduler as their last argument, never inside a config.
 
