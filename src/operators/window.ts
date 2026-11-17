@@ -58,27 +58,17 @@ export const buffer =
       };
     });
 
-export interface BufferTimeConfig {
-  /** Start a new buffer every `creationInterval` ms (overlapping buffers). Default: when the previous one closes. */
-  readonly creationInterval?: number | null;
-  /** Close a buffer early once it holds this many values. */
-  readonly maxBufferSize?: number;
-}
-
 /**
- * Emits the values of each `timeSpan`-ms period as an array.
- *
- * Base case: back-to-back buffers of `timeSpan` ms. With
- * `creationInterval`, buffers start on their own timer and may overlap or
- * leave gaps; with `maxBufferSize`, a full buffer is emitted early. Open
+ * Shared by the four `bufferTime…` operators. Each buffer lasts `timeSpan`
+ * ms. With `creationInterval` null, the next buffer starts when the previous
+ * one closes; otherwise buffers start on their own timer and may overlap or
+ * leave gaps. A buffer holding `maxSize` values is emitted early. Open
  * buffers are emitted on completion.
  */
-export const bufferTime =
-  <A>(timeSpan: number, scheduler: Scheduler = asyncScheduler, config: BufferTimeConfig = {}): Operator<A, A[]> =>
+const bufferTimeCore =
+  <A>(timeSpan: number, creationInterval: number | null, maxSize: number, scheduler: Scheduler): Operator<A, A[]> =>
   (source) =>
     observable<A[]>((sink) => {
-      const maxSize = config.maxBufferSize ?? Number.POSITIVE_INFINITY;
-      const creationInterval = config.creationInterval ?? null;
       const restartOnEmit = creationInterval === null || creationInterval < 0;
       interface Rec {
         readonly buffer: A[];
@@ -133,6 +123,29 @@ export const bufferTime =
         records.length = 0;
       };
     });
+
+/** Emits the values of each `timeSpan`-ms period as an array, back to back. */
+export const bufferTime = <A>(timeSpan: number, scheduler: Scheduler = asyncScheduler): Operator<A, A[]> =>
+  bufferTimeCore<A>(timeSpan, null, Number.POSITIVE_INFINITY, scheduler);
+
+/**
+ * Starts a new `timeSpan`-ms buffer every `interval` ms, so buffers overlap
+ * when `interval < timeSpan` and leave gaps when it is longer.
+ */
+export const bufferTimeEvery = <A>(timeSpan: number, interval: number, scheduler: Scheduler = asyncScheduler): Operator<A, A[]> =>
+  bufferTimeCore<A>(timeSpan, interval, Number.POSITIVE_INFINITY, scheduler);
+
+/** Like `bufferTime`, but emits a buffer early once it holds `maxSize` values. */
+export const bufferTimeOrCount = <A>(timeSpan: number, maxSize: number, scheduler: Scheduler = asyncScheduler): Operator<A, A[]> =>
+  bufferTimeCore<A>(timeSpan, null, maxSize, scheduler);
+
+/** `bufferTimeEvery` and `bufferTimeOrCount` together. */
+export const bufferTimeEveryOrCount = <A>(
+  timeSpan: number,
+  interval: number,
+  maxSize: number,
+  scheduler: Scheduler = asyncScheduler,
+): Operator<A, A[]> => bufferTimeCore<A>(timeSpan, interval, maxSize, scheduler);
 
 /**
  * Opens a buffer whenever `openings` emits; each buffer is emitted when the
@@ -290,20 +303,14 @@ export const windowCount =
       };
     });
 
-export interface WindowTimeConfig {
-  /** Start a new window every `creationInterval` ms (overlapping windows). Default: when the previous one closes. */
-  readonly creationInterval?: number | null;
-  /** Close a window early once it has emitted this many values. */
-  readonly maxWindowSize?: number;
-}
-
-/** Like `bufferTime`, but emits each period as an Observable when it opens. */
-export const windowTime =
-  <A>(timeSpan: number, scheduler: Scheduler = asyncScheduler, config: WindowTimeConfig = {}): Operator<A, Observable<A>> =>
+/**
+ * Shared by the four `windowTime…` operators: like `bufferTimeCore`, but
+ * emits each period as an Observable when it opens.
+ */
+const windowTimeCore =
+  <A>(timeSpan: number, creationInterval: number | null, maxSize: number, scheduler: Scheduler): Operator<A, Observable<A>> =>
   (source) =>
     observable<Observable<A>>((sink) => {
-      const maxSize = config.maxWindowSize ?? Number.POSITIVE_INFINITY;
-      const creationInterval = config.creationInterval ?? null;
       const restartOnClose = creationInterval === null || creationInterval < 0;
       interface Rec {
         readonly window: Subject<A>;
@@ -363,6 +370,32 @@ export const windowTime =
         });
       };
     });
+
+/** Like `bufferTime`, but emits each period as an Observable when it opens. */
+export const windowTime = <A>(timeSpan: number, scheduler: Scheduler = asyncScheduler): Operator<A, Observable<A>> =>
+  windowTimeCore<A>(timeSpan, null, Number.POSITIVE_INFINITY, scheduler);
+
+/** Like `bufferTimeEvery`, but emits each window as an Observable when it opens. */
+export const windowTimeEvery = <A>(
+  timeSpan: number,
+  interval: number,
+  scheduler: Scheduler = asyncScheduler,
+): Operator<A, Observable<A>> => windowTimeCore<A>(timeSpan, interval, Number.POSITIVE_INFINITY, scheduler);
+
+/** Like `windowTime`, but closes a window early once it has emitted `maxSize` values. */
+export const windowTimeOrCount = <A>(
+  timeSpan: number,
+  maxSize: number,
+  scheduler: Scheduler = asyncScheduler,
+): Operator<A, Observable<A>> => windowTimeCore<A>(timeSpan, null, maxSize, scheduler);
+
+/** `windowTimeEvery` and `windowTimeOrCount` together. */
+export const windowTimeEveryOrCount = <A>(
+  timeSpan: number,
+  interval: number,
+  maxSize: number,
+  scheduler: Scheduler = asyncScheduler,
+): Operator<A, Observable<A>> => windowTimeCore<A>(timeSpan, interval, maxSize, scheduler);
 
 /**
  * Opens a window whenever `openings` emits; each window completes when the

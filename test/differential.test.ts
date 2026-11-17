@@ -116,8 +116,16 @@ describe('buffer and window operators match RxJS', () => {
     theirs: ({ a }) => a.pipe(rx.bufferTime(3)),
   }, completingMarbleArb());
   prop1('bufferTime with creation interval and max size', {
-    ours: ({ a }, s) => a.pipe(fp.bufferTime(4, s, { creationInterval: 3, maxBufferSize: 2 })),
+    ours: ({ a }, s) => a.pipe(fp.bufferTimeEveryOrCount(4, 3, 2, s)),
     theirs: ({ a }) => a.pipe(rx.bufferTime(4, 3, 2)),
+  }, completingMarbleArb());
+  prop1('bufferTimeEvery', {
+    ours: ({ a }, s) => a.pipe(fp.bufferTimeEvery(4, 3, s)),
+    theirs: ({ a }) => a.pipe(rx.bufferTime(4, 3)),
+  }, completingMarbleArb());
+  prop1('bufferTimeOrCount', {
+    ours: ({ a }, s) => a.pipe(fp.bufferTimeOrCount(4, 2, s)),
+    theirs: ({ a }) => a.pipe(rx.bufferTime(4, null, 2)),
   }, completingMarbleArb());
   prop2('bufferToggle', {
     ours: ({ a, b }, s) => a.pipe(fp.bufferToggle(b, () => fp.timer(2, undefined, s))),
@@ -144,8 +152,16 @@ describe('buffer and window operators match RxJS', () => {
     theirs: ({ a }) => tagWindowsRx(a.pipe(rx.windowTime(3))),
   }, completingMarbleArb());
   prop1('windowTime with creation interval and max size', {
-    ours: ({ a }, s) => tagWindows(a.pipe(fp.windowTime(4, s, { creationInterval: 3, maxWindowSize: 2 }))),
+    ours: ({ a }, s) => tagWindows(a.pipe(fp.windowTimeEveryOrCount(4, 3, 2, s))),
     theirs: ({ a }) => tagWindowsRx(a.pipe(rx.windowTime(4, 3, 2))),
+  }, completingMarbleArb());
+  prop1('windowTimeEvery', {
+    ours: ({ a }, s) => tagWindows(a.pipe(fp.windowTimeEvery(4, 3, s))),
+    theirs: ({ a }) => tagWindowsRx(a.pipe(rx.windowTime(4, 3))),
+  }, completingMarbleArb());
+  prop1('windowTimeOrCount', {
+    ours: ({ a }, s) => tagWindows(a.pipe(fp.windowTimeOrCount(4, 2, s))),
+    theirs: ({ a }) => tagWindowsRx(a.pipe(rx.windowTime(4, null, 2))),
   }, completingMarbleArb());
   prop2('windowToggle', {
     ours: ({ a, b }, s) => tagWindows(a.pipe(fp.windowToggle(b, () => fp.timer(2, undefined, s)))),
