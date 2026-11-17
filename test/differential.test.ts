@@ -303,3 +303,117 @@ describe('share lifecycles match RxJS', () => {
     expect(scenarioOurs(fp.shareWith(() => fp.createReplaySubject<number>(1), fp.Cached))).toEqual(scenarioTheirs(rx.shareReplay(1)));
   });
 });
+
+/**
+ * The publish family as a theater: A and B take their seats · 0 before the
+ * curtain · connect() · 1 · C arrives late · 2 · disconnect · 3 during the
+ * break · connect() again · 4 · the source completes · D arrives after the
+ * end. Records what each subscriber sees and how often the source was
+ * subscribed.
+ */
+describe('publish family matches RxJS', () => {
+  type Log = { readonly seen: Record<string, unknown[]>; readonly sourceSubscriptions: number };
+  interface Feed {
+    readonly next: (v: number) => void;
+    readonly complete: () => void;
+  }
+  interface Show {
+    readonly subscribe: (o: { next: (v: number) => void; complete: () => void }) => { unsubscribe: () => void };
+    readonly connect: () => { unsubscribe: () => void };
+  }
+
+  const theater = (feed: Feed, show: Show, counter: () => number): Log => {
+    const seen: Record<string, unknown[]> = { A: [], B: [], C: [], D: [] };
+    const on = (name: string) => ({ next: (v: number) => seen[name]!.push(v), complete: () => seen[name]!.push('|') });
+    show.subscribe(on('A'));
+    show.subscribe(on('B'));
+    feed.next(0);
+    const first = show.connect();
+    feed.next(1);
+    show.subscribe(on('C'));
+    feed.next(2);
+    first.unsubscribe();
+    feed.next(3);
+    show.connect();
+    feed.next(4);
+    feed.complete();
+    show.subscribe(on('D'));
+    return { seen, sourceSubscriptions: counter() };
+  };
+
+  const ours = (make: (source: fp.Observable<number>) => fp.Connectable<number>): Log => {
+    let n = 0;
+    const feed = fp.createSubject<number>();
+    const source = fp.observable<number>((sink) => {
+      n++;
+      return fp.subscribeChild(feed, sink);
+    });
+    return theater(feed, make(source), () => n);
+  };
+  const theirs = (op: rx.UnaryFunction<rx.Observable<number>, rx.Observable<number>>): Log => {
+    let n = 0;
+    const feed = new rx.Subject<number>();
+    const source = new rx.Observable<number>((subscriber) => {
+      n++;
+      return feed.subscribe(subscriber);
+    });
+    return theater(feed, source.pipe(op) as rx.ConnectableObservable<number>, () => n);
+  };
+
+  it('publish', () => {
+    expect(ours(fp.publish)).toEqual(theirs(rx.publish()));
+  });
+  it('publishReplay(2)', () => {
+    expect(ours((s) => fp.publishReplay(s, 2))).toEqual(theirs(rx.publishReplay(2)));
+  });
+  it('publishBehavior(-1)', () => {
+    expect(ours((s) => fp.publishBehavior(s, -1))).toEqual(theirs(rx.publishBehavior(-1)));
+  });
+  it('publishLast', () => {
+    expect(ours(fp.publishLast)).toEqual(theirs(rx.publishLast()));
+  });
+
+  // refCount: A subscribes · 1 · B late · 2 · A and B leave · C · 3 · complete · D
+  const refCountScenario = (feed: Feed, shared: { subscribe: Show['subscribe'] }, counter: () => number): Log => {
+    const seen: Record<string, unknown[]> = { A: [], B: [], C: [], D: [] };
+    const on = (name: string) => ({ next: (v: number) => seen[name]!.push(v), complete: () => seen[name]!.push('|') });
+    const a = shared.subscribe(on('A'));
+    feed.next(1);
+    const b = shared.subscribe(on('B'));
+    feed.next(2);
+    a.unsubscribe();
+    b.unsubscribe();
+    shared.subscribe(on('C'));
+    feed.next(3);
+    feed.complete();
+    shared.subscribe(on('D'));
+    return { seen, sourceSubscriptions: counter() };
+  };
+  const oursRefCount = (make: (source: fp.Observable<number>) => fp.Connectable<number>): Log => {
+    let n = 0;
+    const feed = fp.createSubject<number>();
+    const source = fp.observable<number>((sink) => {
+      n++;
+      return fp.subscribeChild(feed, sink);
+    });
+    return refCountScenario(feed, fp.refCount(make(source)), () => n);
+  };
+  const theirsRefCount = (op: rx.UnaryFunction<rx.Observable<number>, rx.ConnectableObservable<number>>): Log => {
+    let n = 0;
+    const feed = new rx.Subject<number>();
+    const source = new rx.Observable<number>((subscriber) => {
+      n++;
+      return feed.subscribe(subscriber);
+    });
+    return refCountScenario(feed, source.pipe(op, rx.refCount()), () => n);
+  };
+
+  it('refCount(publish(source))', () => {
+    expect(oursRefCount(fp.publish)).toEqual(theirsRefCount(rx.publish()));
+  });
+  it('refCount(publishReplay(source, 2))', () => {
+    expect(oursRefCount((s) => fp.publishReplay(s, 2))).toEqual(
+      theirsRefCount(rx.publishReplay(2) as rx.UnaryFunction<rx.Observable<number>, rx.ConnectableObservable<number>>),
+    );
+  });
+});

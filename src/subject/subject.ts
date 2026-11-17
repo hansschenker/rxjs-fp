@@ -387,6 +387,67 @@ export const connectable = <A>(source: Observable<A>, connector: () => Subject<A
 export const connectableOnce = <A>(source: Observable<A>, connector: () => Subject<A> = createSubject): Connectable<A> =>
   connectableCore(source, connector, false);
 
+// ---------------------------------------------------------------------------
+// publish family: named theaters, and refCount
+// ---------------------------------------------------------------------------
+
+/**
+ * The theater view of multicasting: subscribers take their seats, nothing
+ * runs until `connect()` raises the curtain, and then everyone seated sees
+ * the show from the first value. Each `publish…` function is
+ * `connectableOnce` with a different Subject behind the curtain, kept for
+ * the theater's whole life, as RxJS's `publish()` keeps its Subject.
+ *
+ *   const show = publish(source);
+ *   show.subscribe(a);
+ *   show.subscribe(b);
+ *   show.connect();
+ *
+ * Late arrivals see only what happens after they sit down.
+ */
+export const publish = <A>(source: Observable<A>): Connectable<A> => connectableOnce(source, () => createSubject<A>());
+
+/** A theater where late arrivals first see the last `bufferSize` values (default: all). */
+export const publishReplay = <A>(source: Observable<A>, bufferSize: number = Number.POSITIVE_INFINITY): Connectable<A> =>
+  connectableOnce(source, () => createReplaySubject<A>(bufferSize));
+
+/** A theater where everyone sees the current value at once: `initial` before the first one. */
+export const publishBehavior = <A>(source: Observable<A>, initial: A): Connectable<A> =>
+  connectableOnce(source, () => createBehaviorSubject(initial));
+
+/** A theater that shows only the last value, when the source completes. */
+export const publishLast = <A>(source: Observable<A>): Connectable<A> => connectableOnce(source, () => createAsyncSubject<A>());
+
+/**
+ * Connects automatically: the curtain rises when the first subscriber
+ * arrives and falls when the last one leaves; the next subscriber connects
+ * again. The bridge from the theater view to `share`:
+ *
+ *   refCount(publish(source))   // shares one source subscription while anyone listens
+ *
+ * Edge case: unlike `share`, the theater keeps its one Subject, so after the
+ * source has completed, later subscribers get that completion instead of a
+ * new start.
+ */
+export const refCount = <A>(connectable: Connectable<A>): Observable<A> => {
+  // shared by design: the number of subscribers and the running connection
+  let count = 0;
+  let connection: Subscription | null = null;
+  return observable<A>((sink) => {
+    count++;
+    sink.add(() => {
+      count--;
+      if (count === 0 && connection) {
+        const c = connection;
+        connection = null;
+        c.unsubscribe();
+      }
+    });
+    subscribeChild(connectable, sink);
+    if (!sink.closed) connection = connectable.connect();
+  });
+};
+
 /**
  * Shares one subscription to the source within `selector`: the selector
  * receives a multicast view of the source, and the source is connected

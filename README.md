@@ -86,15 +86,32 @@ Entry points: `rxjs-fp` (core and operators), `rxjs-fp/fp` (Option, Either, type
 | **Combination** | `merge`, `concat`, `combineLatest`, `zip`, `forkJoin` (all tuple-typed), `race`, `onErrorResumeNext`, `withLatestFrom`, `startWith`, `endWith`, `*With` (incl. `raceWith`, `onErrorResumeNextWith`), `combineLatestAll`, `zipAll` |
 | **Time** | `delay`, `delayWhen`, `debounceTime`, `debounce`, `throttle` and `throttleTime` (+ `Trailing`, `LeadingAndTrailing`; `throttleWith`, `throttleTimeWith`), `auditTime`, `audit`, `sampleTime`, `sample`, `timeout`, `timeoutFirst`, `timeoutFirstAndEach`, `subscribeOn`, `observeOn` |
 | **Errors** | `catchError`, `catchTimeout`, `retry`, `retryWith` and `retryConsecutiveWith` (with policies `times`, `timesWithDelay`, `exponentialBackoff`), `repeat`, `finalize`, `onErrorReturn`; error values `emptyError`, `timeoutError`, `notFoundError`, `sequenceError`, … with `is*` guards |
-| **Multicasting** | `createSubject`, `createBehaviorSubject`, `createReplaySubject`, `createAsyncSubject`, `share`, `shareReplay`, `shareLatest`, `shareWith(connector, WhileSubscribed | Cached)`, `connectable`, `connectableOnce`, `connect` |
+| **Multicasting** | `createSubject`, `createBehaviorSubject`, `createReplaySubject`, `createAsyncSubject`, `share`, `shareReplay`, `shareLatest`, `shareWith(connector, WhileSubscribed | Cached)`, `connectable`, `connectableOnce`, `connect`, `publish`, `publishReplay`, `publishBehavior`, `publishLast`, `refCount` |
 | **Conversion** | `firstValueFrom`, `lastValueFrom`, `toAsyncIterable` |
 | **Schedulers** | `asyncScheduler`, `asapScheduler`, `queueScheduler` (trampoline), `animationFrameScheduler`, `createVirtualScheduler` |
+
+### Two views of multicasting
+
+- **The theater: `publish`, `publishReplay`, `publishBehavior`, `publishLast`.** Subscribers take their seats, nothing runs until `connect()` raises the curtain, and then everyone seated sees the show from the first value. It is the only way to guarantee that several subscribers see the same values from the very first one. Each is `connectableOnce(source, connector)` with a different Subject behind the curtain, which decides what late arrivals see.
+- **Automatic: `share`, `shareReplay`, `shareLatest`.** The show starts when the first subscriber arrives; later arrivals may have missed the beginning.
+- **The bridge: `refCount(connectable)`** raises the curtain when the first subscriber arrives and lowers it when the last one leaves.
+
+```ts
+const show = publish(source);
+show.subscribe(a);
+show.subscribe(b);
+show.connect(); // a and b both see every value from the first one
+
+const shared = refCount(publish(source)); // connects and disconnects by itself
+```
+
+RxJS 8 alpha removed the `publish` family; RxJS 9 beta brings it back. rxjs-fp keeps it, as plain functions of the source like `connectable`, so the result keeps its `connect` method.
 
 ### Coverage of RxJS 7.8
 
 Every non-deprecated RxJS 7.8 function has an rxjs-fp counterpart. Each operator added to close that gap is checked against RxJS itself: `test/differential.test.ts` feeds the same random marble diagrams to both libraries on virtual time and requires identical notifications at identical frames.
 
-Left out on purpose, because RxJS 7 deprecates them and RxJS 8 removes them: `multicast`, `publish*`, `refCount` (use `share` or `connectable`), `pluck`, `mapTo` (use `map`, `as`), `*MapTo`, `flatMap`, `exhaust`, `combineAll`, `pairs`, `retryWhen`, `repeatWhen`, `timeoutWith` (use `timeout` and `catchTimeout`), and the class exports.
+Left out on purpose, because RxJS 7 deprecates them and RxJS 8 removes them: `multicast` (use `connectable(source, connector)`), `pluck`, `mapTo` (use `map`, `as`), `*MapTo`, `flatMap`, `exhaust`, `combineAll`, `pairs`, `retryWhen`, `repeatWhen`, `timeoutWith` (use `timeout` and `catchTimeout`), and the class exports.
 
 Known differences:
 - **`combineLatest`** (deliberate) completes as soon as one input completes without having emitted, because no combination can ever be produced. RxJS waits for the other inputs to complete. `combineLatestAll` inherits this.
