@@ -92,16 +92,20 @@ describe('duration-selector operators match RxJS', () => {
     theirs: ({ a }) => a.pipe(rx.timestamp(), rx.timeInterval(), rx.map((x) => `${x.value.value}@${x.value.timestamp}+${x.interval}`)),
   });
   prop1('timeout config: each', {
-    ours: ({ a }, s) => a.pipe(fp.timeout({ each: 3, scheduler: s })),
+    ours: ({ a }, s) => a.pipe(fp.timeout(3, s)),
     theirs: ({ a }) => a.pipe(rx.timeout({ each: 3 })),
   });
   prop1('timeout config: first only', {
-    ours: ({ a }, s) => a.pipe(fp.timeout({ first: 3, scheduler: s })),
+    ours: ({ a }, s) => a.pipe(fp.timeoutFirst(3, s)),
     theirs: ({ a }) => a.pipe(rx.timeout({ first: 3 })),
   });
   prop1('timeout config: with', {
-    ours: ({ a }, s) => a.pipe(fp.timeout({ each: 2, scheduler: s, with: (i) => fp.of(`seen${i.seen}`) })),
+    ours: ({ a }, s) => a.pipe(fp.timeout(2, s), fp.catchTimeout((i) => fp.of(`seen${i.seen}`))),
     theirs: ({ a }) => a.pipe(rx.timeout({ each: 2, with: (i) => rx.of(`seen${i.seen}`) })),
+  });
+  prop1('timeout config: first and each', {
+    ours: ({ a }, s) => a.pipe(fp.timeoutFirstAndEach(4, 2, s)),
+    theirs: ({ a }) => a.pipe(rx.timeout({ first: 4, each: 2 })),
   });
 });
 

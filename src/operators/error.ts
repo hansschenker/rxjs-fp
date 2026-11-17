@@ -1,6 +1,7 @@
 import { observable, subscribeChild } from '../core/observable.js';
 import type { Observable, Operator, Subscription, Teardown } from '../core/types.js';
-import { from, timer, type ObservableInput } from '../creation/creation.js';
+import { from, throwError, timer, type ObservableInput } from '../creation/creation.js';
+import { isTimeoutError, type TimeoutInfo } from '../core/errors.js';
 import { asyncScheduler, type Scheduler } from '../scheduler/scheduler.js';
 
 /**
@@ -23,6 +24,16 @@ export const catchError =
     });
     return self;
   };
+
+/**
+ * Recovers from a timeout only. On a `TimeoutError`, switches to
+ * `handler(info)`, where `info` holds the values seen before the timeout;
+ * any other error is passed on unchanged.
+ *
+ *   source.pipe(timeout(3000), catchTimeout(() => of(fallback)))
+ */
+export const catchTimeout = <A, B>(handler: (info: TimeoutInfo<A>) => ObservableInput<B>): Operator<A, A | B> =>
+  catchError<A, B>((err) => (isTimeoutError(err) ? handler(err.info as TimeoutInfo<A>) : throwError(() => err)));
 
 export interface RetryConfig {
   /** Maximum number of resubscriptions. Default: infinite. */

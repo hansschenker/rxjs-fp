@@ -22,9 +22,22 @@ export type EmptyError = TaggedError<'EmptyError'>;
 export const emptyError = tagged('EmptyError', 'no elements in sequence');
 export const isEmptyError = is('EmptyError');
 
-export type TimeoutError = TaggedError<'TimeoutError'>;
-export const timeoutError = tagged('TimeoutError', 'Timeout has occurred');
-export const isTimeoutError = is('TimeoutError');
+/** What a timeout knew when it fired. `TimeoutError` carries it as `info`. */
+export interface TimeoutInfo<A = unknown> {
+  /** Number of values seen before the timeout. */
+  readonly seen: number;
+  /** The last value seen, or `null` if none. */
+  readonly lastValue: A | null;
+}
+
+export interface TimeoutError extends TaggedError<'TimeoutError'> {
+  readonly info: TimeoutInfo;
+}
+export const timeoutError = (
+  info: TimeoutInfo = { seen: 0, lastValue: null },
+  message: string = 'Timeout has occurred',
+): TimeoutError => Object.assign(new Error(message), { name: 'TimeoutError' as const, info });
+export const isTimeoutError = (e: unknown): e is TimeoutError => is('TimeoutError')(e);
 
 export type ArgumentOutOfRangeError = TaggedError<'ArgumentOutOfRangeError'>;
 export const argumentOutOfRangeError = tagged('ArgumentOutOfRangeError', 'argument out of range');

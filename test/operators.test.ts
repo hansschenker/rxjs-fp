@@ -21,6 +21,8 @@ import {
   forkJoin,
   isEmptyError,
   isTimeoutError,
+  catchTimeout,
+  timeoutFirst,
   last,
   map,
   materialize,
@@ -304,6 +306,38 @@ describe('time (virtual scheduler, injected)', () => {
       cold('-----a|').pipe(timeout(2, scheduler)).subscribe({ error: (x) => (e = x) });
     });
     expect(isTimeoutError(e)).toBe(true);
+  });
+
+  it('TimeoutError carries the values seen before the timeout', () => {
+    let e: unknown;
+    runMarbles(({ cold, scheduler }) => {
+      cold('ab-----c|').pipe(timeout(3, scheduler)).subscribe({ error: (x) => (e = x) });
+    });
+    expect(isTimeoutError(e) && e.info).toEqual({ seen: 2, lastValue: 'b' });
+  });
+
+  it('catchTimeout switches to the fallback on a timeout only', () => {
+    runMarbles(({ cold, scheduler, expectObservable }) => {
+      expectObservable(cold('a----b|').pipe(timeout(3, scheduler), catchTimeout((info) => of(`seen ${info.seen}`)))).toBe(
+        'a--(x|)',
+        { a: 'a', x: 'seen 1' },
+      );
+      const other = new Error('not a timeout');
+      expectObservable(cold('a#', undefined, other).pipe(timeout(3, scheduler), catchTimeout(() => of('fallback')))).toBe(
+        'a#',
+        undefined,
+        other,
+      );
+    });
+  });
+
+  it('timeoutFirst only guards the first value', () => {
+    runMarbles(({ cold, scheduler, expectObservable }) => {
+      expectObservable(cold('-a------b|').pipe(timeoutFirst(3, scheduler))).toBe('-a------b|');
+      expectObservable(cold('-----a|').pipe(timeoutFirst(3, scheduler)).pipe(catchTimeout(() => of('late')))).toBe('---(l|)', {
+        l: 'late',
+      });
+    });
   });
 
   it('interval on virtual time', () => {

@@ -241,50 +241,27 @@ export const sampleTime =
       };
     });
 
-export interface TimeoutInfo<A> {
-  /** Number of values seen before the timeout. */
-  readonly seen: number;
-  /** The last value seen, or `null` if none. */
-  readonly lastValue: A | null;
-}
-
-export interface TimeoutConfig<A, B = never> {
-  /** Maximum gap (ms) between subscription and the first value, and between values. */
-  readonly each?: number;
-  /** Deadline for the first value: ms after subscription, or an absolute `Date`. Defaults to `each`. */
-  readonly first?: number | Date;
-  /** Switch to this Observable on timeout instead of erroring with `TimeoutError`. */
-  readonly with?: (info: TimeoutInfo<A>) => ObservableInput<B>;
-  readonly scheduler?: Scheduler;
-}
-
 /**
- * Base case: `timeout(ms, scheduler)` errors with `TimeoutError` if the
- * first value, or the gap between two values, exceeds `ms`.
- *
- * The config form adds a separate deadline for the first value (`first`,
- * alone it only guards the first value) and a fallback Observable (`with`).
+ * Shared by `timeout`, `timeoutFirst` and `timeoutFirstAndEach`. `first` is
+ * the deadline for the first value (ms after subscription, or a `Date`);
+ * `each` is the longest allowed gap between values, and also the first
+ * deadline when `first` is not given. On timeout it errors with a
+ * `TimeoutError` whose `info` holds the values seen so far.
  */
-export function timeout<A>(ms: number, scheduler?: Scheduler): Operator<A, A>;
-export function timeout<A, B = never>(config: TimeoutConfig<A, B>): Operator<A, A | B>;
-export function timeout<A, B>(config: number | TimeoutConfig<A, B>, scheduler: Scheduler = asyncScheduler): Operator<A, A | B> {
-  const cfg: TimeoutConfig<A, B> = typeof config === 'number' ? { each: config, scheduler } : config;
-  if (cfg.each == null && cfg.first == null) throw new TypeError('rxjs-fp timeout: provide `each` or `first`');
-  const sch = cfg.scheduler ?? asyncScheduler;
-  return (source) =>
-    observable<A | B>((sink) => {
+const timeoutCore =
+  <A>(first: number | Date | undefined, each: number | undefined, sch: Scheduler): Operator<A, A> =>
+  (source) =>
+    observable<A>((sink) => {
       let seen = 0;
       let lastValue: A | null = null;
       let timedOut = false;
       let cancel: Teardown = noop;
       let src: Subscription | null = null;
-      let fallback: Subscription | null = null;
 
       const onTimeout = (): void => {
         timedOut = true;
         src?.unsubscribe();
-        if (cfg.with) fallback = subscribeChild(from(cfg.with({ seen, lastValue })), sink);
-        else sink.error(timeoutError());
+        sink.error(timeoutError({ seen, lastValue }));
       };
       const arm = (ms: number): void => {
         cancel();
@@ -297,7 +274,7 @@ export function timeout<A, B>(config: number | TimeoutConfig<A, B>, scheduler: S
           lastValue = a;
           cancel();
           cancel = noop;
-          if (cfg.each != null) arm(cfg.each);
+          if (each != null) arm(each);
           sink.next(a);
         },
         complete: () => {
@@ -307,18 +284,40 @@ export function timeout<A, B>(config: number | TimeoutConfig<A, B>, scheduler: S
       if (timedOut) src.unsubscribe();
       // Armed after subscribing, like RxJS: source events due at the same
       // virtual time as the deadline were scheduled first and win the tie.
-      const first = cfg.first;
       if (seen === 0 && !sink.closed) {
-        if (first == null) arm(cfg.each as number);
+        if (first == null) arm(each as number);
         else arm(typeof first === 'number' ? first : first.getTime() - sch.now());
       }
       return () => {
         cancel();
         src?.unsubscribe();
-        fallback?.unsubscribe();
       };
     });
-}
+
+/**
+ * Errors with `TimeoutError` if the first value, or the gap between two
+ * values, takes longer than `ms`. To switch to a fallback instead, follow it
+ * with `catchTimeout`.
+ */
+export const timeout = <A>(ms: number, scheduler: Scheduler = asyncScheduler): Operator<A, A> =>
+  timeoutCore<A>(undefined, ms, scheduler);
+
+/**
+ * Errors with `TimeoutError` if the first value does not arrive within
+ * `first`: ms after subscription, or by a `Date`. Later values are not timed.
+ */
+export const timeoutFirst = <A>(first: number | Date, scheduler: Scheduler = asyncScheduler): Operator<A, A> =>
+  timeoutCore<A>(first, undefined, scheduler);
+
+/**
+ * Errors with `TimeoutError` if the first value does not arrive within
+ * `first`, or if a later gap between two values takes longer than `each`.
+ */
+export const timeoutFirstAndEach = <A>(
+  first: number | Date,
+  each: number,
+  scheduler: Scheduler = asyncScheduler,
+): Operator<A, A> => timeoutCore<A>(first, each, scheduler);
 
 /** Subscribes to the source through the scheduler (after `delayMs`). */
 export const subscribeOn =
