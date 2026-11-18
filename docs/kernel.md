@@ -25,43 +25,58 @@ identity test (below) is correct by construction.
 
 ## The kernel
 
-A first, deliberately generous selection, to be trimmed towards 30 as the identity tests show which
-ones can become vocabulary. It now stands at 48: `takeLast`, `defaultIfEmpty` and `throwIfEmpty` joined
-because they replace nine native implementations; `retryWith`, `retryConsecutiveWith`, `repeat`,
-`connectableOnce`, `connect` and `refCount` turned out not to be compositions; `takeUntil` left
-because it is one.
+Every operator in rxjs-fp is now either kernel or vocabulary; nothing is left outside the family
+modules except infrastructure (schedulers, error constructors, notification helpers, subscription
+utilities and the Promise conversions). `src/kernel.ts` lists the kernel exactly. It has four tiers:
 
-### Creation (10)
+| Tier | What it is | Count |
+| --- | --- | --- |
+| Primitives | `observable` (the constructor) and `fromMachine` (runs a pure machine) | 2 |
+| Base operators | implemented directly, and either not a composition or the base other operators are built on | 53 |
+| Named cores | several public names over one native implementation, chosen by name instead of a config object | 3 cores, 9 names |
+| Adapters | bridges to platform sources: iterables, Promises, async iterables, callbacks, event APIs, animation frames | 10 |
+
+When is a machine kernel? Every value operator is a `fromMachine` machine. The kernel holds the
+machines other operators are built on (`take`, `filter`, `reduce`, …). A machine that nothing builds
+on (`pairwise`, `skipLast`, `single`, `max`, `min`, `bufferCount`) is vocabulary: it is plain data
+and pure `step`/`flush` functions handed to the primitive `fromMachine`, with no shell code of its
+own.
+
+### Creation (8 base operators, 10 adapters)
 
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
-| `observable` | the constructor: a producer function | everything else |
-| `from` | adopts any input: array, Promise, iterable, Observable | `of` |
+| `observable` (primitive) | the constructor: a producer function | everything else |
+| `from` | adopts any input, through the adapters below | `of`, `generate` |
 | `defer` | creates the Observable per subscription | `iif` |
-| `EMPTY`, `NEVER`, `throwError` | the three trivial sequences | |
+| `EMPTY`, `NEVER`, `throwError` | the three trivial sequences | `empty()`, `never()` |
 | `timer` | a value after a delay, optionally repeating | `interval`, and every `…Time` operator |
 | `unfold` | generates values from a seed with a pure function | `range` |
-| `fromEvent` | adapts DOM or Node events | `fromEventPattern`, `bindCallback` |
 | `using` | ties a resource to the subscription's lifetime | |
 
-### Value-based (12)
+Adapters: `fromIterable`, `fromArrayLike`, `fromPromise`, `fromAsyncIterable`, `fromSubscribable`,
+`fromEventPattern`, `bindCallback`, `bindNodeCallback`, `animationFrames`, `scheduled`.
+`fromEvent` is vocabulary: `fromEventPattern` with add and remove listener calls on the target.
 
-All of these are machines run by `fromMachine`, the one primitive behind the family.
+### Value-based (14 base operators, 1 named core)
 
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
-| `map` | transforms each value | `as`, `withIndex` |
-| `filter` | keeps values that pass a test | `ignoreElements` |
-| `scan` | accumulates, emitting every state | |
+| `fromMachine` (primitive) | runs a machine: `init`, pure `step` and `flush` | the machines below, and `pairwise`, `skipLast`, `single`, `max`, `min`, `bufferCount` |
+| `map` | transforms each value | `as`, `withIndex`, `filterMap` |
+| `filter` | keeps values that pass a test | `ignoreElements`, `filterMap`, `partition` |
+| `scan` | accumulates, emitting every state | `timeInterval`, `skipUntil` |
 | `reduce` | accumulates, emitting the final state | `count`, `toArray` |
 | `take` | the first `n` values, completing with the `n`th | `first`, `elementAt`, `find`, `findIndex`, `every`, `isEmpty` |
-| `takeLast` | the last `n` values, on completion | `last` |
-| `defaultIfEmpty` | a fallback value if the source completes empty | `first`, `last`, `elementAt` with a default; `find`, `findIndex`, `every`, `isEmpty` |
-| `throwIfEmpty` | an error if the source completes empty | `first`, `last`, `elementAt` without a default |
-| `takeWhile` | values while a test holds, completing when it fails | |
+| `takeLast` | the last `n` values, on completion | `last`, `forkJoin` |
+| `takeWhile` | values while a test holds, completing when it fails | `takeUntil`, `skipUntil` |
 | `skipWhile` | drops values while a test holds | `skip` |
 | `distinct(key?)` | drops values seen before | |
 | `distinctUntilChanged` | drops a value equal to the previous one | `distinctUntilKeyChanged` |
+| `defaultIfEmpty` | a fallback value if the source completes empty | `first`, `last`, `elementAt` with a default; `find`, `findIndex`, `every`, `isEmpty` |
+| `throwIfEmpty` | an error if the source completes empty | `first`, `last`, `elementAt` without a default |
+| `materialize`, `dematerialize` | notifications as values, and back | |
+| `groupBy`, `groupByUntil` (named core) | one inner Observable per key | |
 
 `first`, `elementAt`, `find`, `findIndex`, `every` and `isEmpty` are one sentence with three choices:
 pick the value with `filter` and `take(1)`, then say what an empty stream means with
@@ -70,26 +85,38 @@ pick the value with `filter` and `take(1)`, then say what an empty stream means 
 `take` and `takeWhile` stay separate: `take(n)` completes with its `n`th value, while
 `takeWhile((_, i) => i < n)` completes only when the next value arrives and fails the test.
 
-### Time-based (9)
+### Time-based (11 base operators, 2 named cores)
 
 The kernel takes its criterion as an Observable or a function. Each `…Time` operator is the
-vocabulary version with a timer.
+vocabulary version with a timer, and each buffer operator but one is its window counterpart with
+every window collected into an array.
 
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
 | `debounce` | emits a value after a quiet period | `debounceTime` |
-| `throttleWith(strategy)` | lets one value through per window | `throttle`, `throttleTime` and their variants |
+| `throttleWith(strategy)` | lets one value through per window | `throttle`, `throttleTime` and their `Trailing` / `LeadingAndTrailing` variants |
 | `audit` | emits the latest value at the end of each window | `auditTime` |
 | `sample` | emits the latest value when a notifier fires | `sampleTime` |
-| `buffer` | collects values into arrays, closed by a notifier | `bufferTime…`, `bufferWhen`, `bufferCount` |
-| `window` | like `buffer`, but each chunk is an Observable | `windowTime…`, `windowWhen`, `windowCount` |
-| `timeout` | errors when a value takes too long | `timeoutFirst`, `timeoutFirstAndEach` |
+| `timeout`, `timeoutFirst`, `timeoutFirstAndEach` (named core) | errors when a value takes too long | `catchTimeout` (errors family) |
+| `window` | chunks of values as Observables, closed by a notifier | `buffer` |
+| `windowTime`, `…Every`, `…OrCount`, `…EveryOrCount` (named core) | chunks by time, overlapping or capped | the four `bufferTime…` |
+| `windowToggle` | a chunk per opening, closed by its own closing | `bufferToggle` |
+| `windowWhen`, `windowCount` | back-to-back chunks by a closing factory, or by count | |
+| `bufferWhen` | back-to-back arrays by a closing factory | |
 | `observeOn`, `subscribeOn` | move notifications or the subscription onto a scheduler | |
 
-### Concurrency (1 operator, 4 strategies)
+`bufferWhen` is the exception among the buffers: RxJS 7 opens a new window when the closing
+notifier completes, but ignores that completion for a buffer, so `windowWhen` plus `toArray` would
+differ from RxJS there. `bufferCount` is not `windowCount` plus `toArray` either: `windowCount`
+opens a window on an empty source, so that version would emit `[]` where RxJS emits nothing.
+
+Also vocabulary here: `delay`, `emitAfter`, `delayWhen` (`mergeMap` over a duration), `timestamp`
+(`map` with `scheduler.now()`), `timeInterval` (`timestamp` then `scan`).
+
+### Concurrency (3)
 
 Concurrency is what happens when a value starts nested work while earlier work is still running.
-One kernel operator, `flatMapWith(strategy)`, with four strategies:
+`flatMapWith(strategy)` takes one of four strategies:
 
 | Vocabulary | Strategy | When new work arrives while work is running |
 | --- | --- | --- |
@@ -97,6 +124,9 @@ One kernel operator, `flatMapWith(strategy)`, with four strategies:
 | `concatMap` | `Concat` | queues it until the running work completes |
 | `switchMap` | `Switch` | cancels the running work, starts the new |
 | `exhaustMap` | `Exhaust` | ignores the new work until the running work completes |
+
+`scanWith(strategy)` is its twin for accumulators that return Observables (`mergeScan`,
+`switchScan`), and `expand` feeds every result back into the projection.
 
 The same four strategies run through the time family. Applied to `timer(ms)`:
 
@@ -107,17 +137,18 @@ The same four strategies run through the time family. Applied to `timer(ms)`:
 | delay: every value waits in parallel | `Merge` |
 | spacing values out by `ms` | `Concat` |
 
-### Combination (4)
+### Combination (5)
 
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
-| `combineLatest` | combines the latest value of each input | `combineLatestWith`, `combineLatestAll` |
+| `combineLatest` | combines the latest value of each input | `combineLatestWith`, `combineLatestAll`, `forkJoin` |
 | `zip` | pairs values by position | `zipWith`, `zipAll` |
 | `withLatestFrom` | adds the other inputs' latest values to each source value | |
 | `race` | follows whichever input emits first | `raceWith` |
+| `sequenceEqual` | compares two sequences value by value | |
 
-Vocabulary on top, together with the concurrency vocabulary: `takeUntil`, `forkJoin`, `startWith`,
-`endWith`, `onErrorResumeNext`, `onErrorResumeNextWith`, `partition`.
+Vocabulary on top, together with the concurrency vocabulary: `takeUntil`, `skipUntil`, `forkJoin`,
+`startWith`, `endWith`, `onErrorResumeNext`, `onErrorResumeNextWith`, `partition`.
 
 `combineLatest` keeps one deliberate difference from RxJS 7: it completes as soon as an input
 completes without a value, since it can never emit after that (RxJS waits for all inputs).
@@ -126,7 +157,7 @@ completes without a value, since it can never emit after that (RxJS waits for al
 
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
-| `catchError` | replaces an error with another Observable | `catchTimeout`, `onErrorReturn` |
+| `catchError` | replaces an error with another Observable | `catchTimeout`, `onErrorReturn`, `onErrorResumeNext` |
 | `retryWith(policy)` | resubscribes on error, as the policy decides: `retryNow`, `retryAfter(ms)`, `giveUp` | `retry`, with the policies `times`, `timesWithDelay`, `exponentialBackoff` |
 | `retryConsecutiveWith(policy)` | like `retryWith`, counting only errors since the last value | |
 | `repeat` | resubscribes on completion | |
@@ -148,12 +179,23 @@ They stay in the kernel, as loops.
 | `connect(selector)` | multicasts within one subscription | |
 | `shareWith(connector, lifecycle)` | connects automatically | `share`, `shareReplay`, `shareLatest` |
 
-### Candidates for trimming towards 30
+### How far from 30
 
-- `EMPTY`, `NEVER` and `throwError` could count as one family of trivial sequences.
-- `observeOn` and `subscribeOn` are scheduling tools rather than stream behaviours.
-- `withLatestFrom` and `race` may still turn out to be compositions (`takeUntil` was one).
-- `using` is rarely needed.
+53 base operators, not 30 (8 creation, 14 value, 11 time, 3 concurrency, 5 combination, 6 errors, 6 multicast). Where the next reductions could come from, each still to be confirmed
+by an identity test:
+
+- **The window family (6 entries)** is the biggest block. If `windowTime…` and `windowCount` can be
+  written with `windowToggle` and timers, two entries and a named core go.
+- **Trivial sequences.** `EMPTY`, `NEVER` and `throwError` are one idea; counted as one, two go.
+- **Scheduling.** `observeOn` and `subscribeOn` move work onto a scheduler rather than shaping the
+  stream; they could live with the schedulers instead.
+- **Combination.** `withLatestFrom`, `race` and `sequenceEqual` may turn out to be compositions,
+  as `takeUntil` and `skipUntil` did.
+- **Notifications.** `materialize` and `dematerialize` could count as one primitive pair beside
+  `fromMachine`.
+
+If all of these work out, the kernel drops by about ten, to a little over 40. Getting to 30 needs the postponed step below:
+time and coordination as pure machines, where one interpreter replaces most of the native time code.
 
 ## The vocabulary modules
 
@@ -194,12 +236,7 @@ Rules that keep the layering intact:
 | `rxjs-fp/combination` | `src/vocabulary/combination.ts` | done: `takeUntil`, `forkJoin`, `startWith`, `endWith`, `onErrorResumeNext`, `combineLatestWith`, `zipWith`, `raceWith`, `onErrorResumeNextWith`, `combineLatestAll`, `zipAll`, `partition` |
 | `rxjs-fp/errors` | `src/vocabulary/errors.ts` | done: `retry`, `times`, `timesWithDelay`, `exponentialBackoff`, `catchTimeout`, `onErrorReturn` |
 | `rxjs-fp/multicast` | `src/vocabulary/multicast.ts` | done: `share`, `shareReplay`, `shareLatest`, `publish`, `publishReplay`, `publishBehavior`, `publishLast` |
-
-Outliers still implemented natively outside the kernel, to be handled later: `pairwise`, `skipLast`,
-`single`, `max`, `min`, `bufferCount`, `filterMap`, `generate`, `scheduled`, `skipUntil`,
-`sequenceEqual`, `mergeScan`, `switchScan`, `delayWhen`, `timestamp`, `timeInterval`, the
-`buffer…`/`window…` variants and `groupBy`. They are exported from the root `rxjs-fp`, but not yet
-from a family module.
+| former outliers | the modules above | done: every operator is now in a family module. Leaf machines (`pairwise`, `skipLast`, `single`, `max`, `min`, `bufferCount`) moved as written; `filterMap`, `skipUntil`, `timeInterval`, `timestamp`, `delayWhen`, `throttle…`, `mergeScan`, `switchScan`, `fromEvent`, `generate`, `empty`, `never` and six buffer operators became compositions |
 
 `test/layering.test.ts` enforces the three rules: vocabulary imports only the kernel, the kernel never
 reaches the vocabulary (checked transitively), and the root exports the same functions as the
@@ -246,6 +283,13 @@ Results so far:
 | `retry(n)`, `exponentialBackoff`, `catchTimeout`, `onErrorReturn` | `retryWith` with a policy, `catchError` | identical |
 | `retryWith`, `repeat` | recursion through `catchError` or `concat` | identical output, but grows by one subscription layer per resubscription: stays in the kernel |
 | `share…`, `publish…` | `shareWith` or `connectableOnce` with a Subject | identical in the scripted multi-subscriber scenarios |
+| `buffer`, `bufferTime…` ×4, `bufferToggle` | the window counterpart, then `mergeMap(toArray())` | identical, including closings that complete empty, never close, or error |
+| `bufferWhen` | `windowWhen`, then `mergeMap(toArray())` | differs when the closing notifier completes without emitting: RxJS reopens a window but not a buffer. Stays in the kernel |
+| `bufferCount` | `windowCount`, then `mergeMap(toArray())` | differs on an empty source (`[]` instead of nothing). Stays a machine |
+| `skipUntil(n)` | the `takeUntil` merge, with the notifier's first value opening a gate (`scan`) instead of stopping | identical |
+| `filterMap`, `timeInterval`, `delayWhen`, `timestamp` | `map`/`filter`/`map`; `timestamp` then `scan`; `mergeMap` over the duration; `map` with `scheduler.now()` | identical |
+| `fromEvent` | `fromEventPattern` with add/remove listener | identical events, and the listener is removed on unsubscribe, for Node-style and DOM-style targets |
+| `generate`, `empty()`, `never()` | `from` or `scheduled` over the states; `EMPTY`; `NEVER` | identical, with and without a scheduler |
 
 ## The naming style for pipelines
 

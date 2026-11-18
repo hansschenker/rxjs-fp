@@ -27,169 +27,21 @@ const removeFrom = <X>(xs: X[], x: X): void => {
 // buffer*
 // ---------------------------------------------------------------------------
 
-/**
- * Collects values into an array and emits it whenever `closingNotifier`
- * emits. The last buffer is emitted on completion, even if empty.
- */
-export const buffer =
-  <A>(closingNotifier: ObservableInput<unknown>): Operator<A, A[]> =>
-  (source) =>
-    observable<A[]>((sink) => {
-      let current: A[] = [];
-      const src = subscribeChild(source, sink, {
-        next: (a) => {
-          current.push(a);
-        },
-        complete: () => {
-          sink.next(current);
-          sink.complete();
-        },
-      });
-      const n = subscribeInner(closingNotifier, sink, {
-        next: () => {
-          const b = current;
-          current = [];
-          sink.next(b);
-        },
-      });
-      return () => {
-        src.unsubscribe();
-        n.close();
-      };
-    });
+// ---------------------------------------------------------------------------
+// window*
+// ---------------------------------------------------------------------------
+
+/** Opens a window: emits its read-only view downstream and returns the Subject. */
+const openWindow = <A>(sink: Sink<Observable<A>>): Subject<A> => {
+  const w = createSubject<A>();
+  sink.next(w.asObservable());
+  return w;
+};
 
 /**
- * Shared by the four `bufferTime…` operators. Each buffer lasts `timeSpan`
- * ms. With `creationInterval` null, the next buffer starts when the previous
- * one closes; otherwise buffers start on their own timer and may overlap or
- * leave gaps. A buffer holding `maxSize` values is emitted early. Open
- * buffers are emitted on completion.
- */
-const bufferTimeCore =
-  <A>(timeSpan: number, creationInterval: number | null, maxSize: number, scheduler: Scheduler): Operator<A, A[]> =>
-  (source) =>
-    observable<A[]>((sink) => {
-      const restartOnEmit = creationInterval === null || creationInterval < 0;
-      interface Rec {
-        readonly buffer: A[];
-        cancel: Teardown;
-      }
-      const records: Rec[] = [];
-      let cancelCreation: Teardown = () => {};
-
-      const emit = (rec: Rec): void => {
-        rec.cancel();
-        removeFrom(records, rec);
-        sink.next(rec.buffer);
-        if (restartOnEmit) start();
-      };
-      const start = (): void => {
-        if (sink.closed) return;
-        const rec: Rec = { buffer: [], cancel: () => {} };
-        records.push(rec);
-        rec.cancel = scheduler.schedule(() => emit(rec), timeSpan);
-      };
-      if (!restartOnEmit) {
-        const every = creationInterval as number;
-        const tick = (): void => {
-          start();
-          if (!sink.closed) cancelCreation = scheduler.schedule(tick, every);
-        };
-        cancelCreation = scheduler.schedule(tick, every);
-      }
-      start();
-
-      const src = subscribeChild(source, sink, {
-        next: (a) => {
-          for (const rec of records.slice()) {
-            rec.buffer.push(a);
-            if (rec.buffer.length >= maxSize) emit(rec);
-          }
-        },
-        complete: () => {
-          cancelCreation();
-          while (records.length > 0) {
-            const rec = records.shift() as Rec;
-            rec.cancel();
-            sink.next(rec.buffer);
-          }
-          sink.complete();
-        },
-      });
-      return () => {
-        src.unsubscribe();
-        cancelCreation();
-        records.forEach((r) => r.cancel());
-        records.length = 0;
-      };
-    });
-
-/** Emits the values of each `timeSpan`-ms period as an array, back to back. */
-export const bufferTime = <A>(timeSpan: number, scheduler: Scheduler = asyncScheduler): Operator<A, A[]> =>
-  bufferTimeCore<A>(timeSpan, null, Number.POSITIVE_INFINITY, scheduler);
-
-/**
- * Starts a new `timeSpan`-ms buffer every `interval` ms, so buffers overlap
- * when `interval < timeSpan` and leave gaps when it is longer.
- */
-export const bufferTimeEvery = <A>(timeSpan: number, interval: number, scheduler: Scheduler = asyncScheduler): Operator<A, A[]> =>
-  bufferTimeCore<A>(timeSpan, interval, Number.POSITIVE_INFINITY, scheduler);
-
-/** Like `bufferTime`, but emits a buffer early once it holds `maxSize` values. */
-export const bufferTimeOrCount = <A>(timeSpan: number, maxSize: number, scheduler: Scheduler = asyncScheduler): Operator<A, A[]> =>
-  bufferTimeCore<A>(timeSpan, null, maxSize, scheduler);
-
-/** `bufferTimeEvery` and `bufferTimeOrCount` together. */
-export const bufferTimeEveryOrCount = <A>(
-  timeSpan: number,
-  interval: number,
-  maxSize: number,
-  scheduler: Scheduler = asyncScheduler,
-): Operator<A, A[]> => bufferTimeCore<A>(timeSpan, interval, maxSize, scheduler);
-
-/**
- * Opens a buffer whenever `openings` emits; each buffer is emitted when the
- * Observable returned by `closingSelector(openValue)` emits. Buffers still
- * open at completion are emitted then.
- */
-export const bufferToggle =
-  <A, O>(openings: ObservableInput<O>, closingSelector: (openValue: O) => ObservableInput<unknown>): Operator<A, A[]> =>
-  (source) =>
-    observable<A[]>((sink) => {
-      const buffers: A[][] = [];
-      const closings = new Set<Inner>();
-      const open = subscribeInner(openings, sink, {
-        next: (o) => {
-          const b: A[] = [];
-          buffers.push(b);
-          const c = subscribeInner(closingSelector(o), sink, {
-            next: (_, self) => {
-              self.close();
-              closings.delete(self);
-              removeFrom(buffers, b);
-              sink.next(b);
-            },
-          });
-          if (!c.closed) closings.add(c);
-        },
-      });
-      const src = subscribeChild(source, sink, {
-        next: (a) => {
-          for (const b of buffers) b.push(a);
-        },
-        complete: () => {
-          while (buffers.length > 0) sink.next(buffers.shift() as A[]);
-          sink.complete();
-        },
-      });
-      return () => {
-        open.close();
-        closings.forEach((c) => c.close());
-        src.unsubscribe();
-      };
-    });
-
-/**
+ * Kernel: not `windowWhen` with `toArray`. RxJS 7 opens a new window when the
+ * closing notifier completes, but ignores that completion for a buffer.
+ *
  * Starts a buffer immediately; whenever the Observable returned by
  * `closingSelector()` emits, emits the buffer and starts the next one
  * (calling `closingSelector` again). The last buffer is emitted on completion.
@@ -223,17 +75,6 @@ export const bufferWhen =
         src.unsubscribe();
       };
     });
-
-// ---------------------------------------------------------------------------
-// window*
-// ---------------------------------------------------------------------------
-
-/** Opens a window: emits its read-only view downstream and returns the Subject. */
-const openWindow = <A>(sink: Sink<Observable<A>>): Subject<A> => {
-  const w = createSubject<A>();
-  sink.next(w.asObservable());
-  return w;
-};
 
 /**
  * Like `buffer`, but emits each chunk as an Observable when it opens. A new

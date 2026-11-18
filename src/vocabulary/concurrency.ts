@@ -13,11 +13,11 @@
  * Built only on the kernel (checked by test/layering.test.ts), and each
  * definition confirmed against RxJS 7 by test/differential.test.ts.
  */
-import { Concat, Exhaust, flatMapWith, from, identity, Merge, Switch } from '../kernel.js';
+import { Concat, Exhaust, flatMapWith, from, identity, Merge, scanWith, Switch } from '../kernel.js';
 import type { Observable, ObservableInput, Operator, ValueOf } from '../kernel.js';
 
 // The family's kernel members, so the family is importable from one place
-export { flatMapWith, Merge, Concat, Switch, Exhaust, expand } from '../kernel.js';
+export { flatMapWith, scanWith, Merge, Concat, Switch, Exhaust, expand } from '../kernel.js';
 export type { FlattenStrategy } from '../kernel.js';
 
 type Project<A, B> = (value: A, index: number) => ObservableInput<B>;
@@ -67,3 +67,14 @@ export const concatWith =
   <A, const T extends Sources>(...others: T): Operator<A, A | Union<T>> =>
   (source) =>
     concat(source, ...others);
+
+/** `scan` with an Observable-returning accumulator, merged (up to `concurrent` at once). */
+export const mergeScan = <A, S>(
+  accumulator: (acc: S, value: A, index: number) => ObservableInput<S>,
+  seed: S,
+  concurrent: number = Number.POSITIVE_INFINITY,
+): Operator<A, S> => scanWith(Merge(concurrent))(accumulator, seed);
+
+/** `scan` with an Observable-returning accumulator; a new value cancels the running inner. */
+export const switchScan = <A, S>(accumulator: (acc: S, value: A, index: number) => ObservableInput<S>, seed: S): Operator<A, S> =>
+  scanWith(Switch)(accumulator, seed);

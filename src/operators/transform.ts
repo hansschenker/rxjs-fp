@@ -36,26 +36,6 @@ export const reduce = <A, S>(f: (acc: S, value: A, index: number) => S, seed: S)
     flush: (acc) => flushWith([acc]),
   });
 
-/** Emits `[previous, current]` pairs. */
-export const pairwise = <A>(): Operator<A, readonly [A, A]> =>
-  fromMachine<{ readonly has: boolean; readonly prev: A | undefined }, A, readonly [A, A]>({
-    init: () => ({ has: false, prev: undefined }),
-    step: (s, a) => (s.has ? cont({ has: true, prev: a }, [[s.prev as A, a] as const]) : cont({ has: true, prev: a })),
-  });
-
-/** Buffers values into arrays of `size`, starting a new buffer every `every` values. */
-export const bufferCount = <A>(size: number, every: number = size): Operator<A, readonly A[]> =>
-  fromMachine<{ readonly buffers: ReadonlyArray<readonly A[]> }, A, readonly A[]>({
-    init: () => ({ buffers: [] }),
-    step: (s, a, i) => {
-      const opened = i % every === 0 ? [...s.buffers, []] : s.buffers;
-      const filled = opened.map((b) => [...b, a]);
-      const full = filled.filter((b) => b.length >= size);
-      return cont({ buffers: filled.filter((b) => b.length < size) }, full);
-    },
-    flush: (s) => flushWith(s.buffers.filter((b) => b.length > 0)),
-  });
-
 /** Emits `value` if the source completes without emitting. */
 export const defaultIfEmpty = <A, B>(value: B): Operator<A, A | B> =>
   fromMachine<boolean, A, A | B>({

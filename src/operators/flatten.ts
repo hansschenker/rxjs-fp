@@ -145,7 +145,12 @@ export const expand =
  * Every inner value is emitted and becomes the new accumulated state.
  * The state is per subscription (created in `defer`).
  */
-const scanWith =
+/**
+ * `scan` whose accumulator returns an Observable, flattened with `strategy`;
+ * each emitted state is the accumulator for the next value. The concurrency
+ * twin of `flatMapWith`: used through `mergeScan` and `switchScan`.
+ */
+export const scanWith =
   (strategy: FlattenStrategy) =>
   <A, S>(accumulator: (acc: S, value: A, index: number) => ObservableInput<S>, seed: S): Operator<A, S> =>
   (source) =>
@@ -157,14 +162,3 @@ const scanWith =
         }),
       );
     });
-
-/** `scan` with an Observable-returning accumulator, merged (up to `concurrent` at once). */
-export const mergeScan = <A, S>(
-  accumulator: (acc: S, value: A, index: number) => ObservableInput<S>,
-  seed: S,
-  concurrent: number = Number.POSITIVE_INFINITY,
-): Operator<A, S> => scanWith(Merge(concurrent))(accumulator, seed);
-
-/** `scan` with an Observable-returning accumulator; a new value cancels the running inner. */
-export const switchScan = <A, S>(accumulator: (acc: S, value: A, index: number) => ObservableInput<S>, seed: S): Operator<A, S> =>
-  scanWith(Switch)(accumulator, seed);

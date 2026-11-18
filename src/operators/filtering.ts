@@ -1,8 +1,7 @@
 import { observable, subscribeChild } from '../core/observable.js';
 import { cont, flushWith, fromMachine, halt } from '../core/machine.js';
-import type { Observable, Operator, Subscription } from '../core/types.js';
+import type { Operator } from '../core/types.js';
 import { EMPTY } from '../creation/creation.js';
-import { isSome, type Option } from '../fp/option.js';
 
 /** Keeps values that satisfy the predicate. Narrows the type for refinements. */
 export function filter<A, B extends A>(refinement: (value: A, index: number) => value is B): Operator<A, B>;
@@ -18,24 +17,6 @@ export function filter<A>(predicate: (value: A, index: number) => boolean): Oper
       });
     });
 }
-
-/**
- * Map and filter in one step: `some(b)` emits `b`, `none` drops the value.
- * Exceptions thrown by `f` are routed to `error` (a bug in the earlier
- * v7-fp fork reported them as unhandled instead).
- */
-export const filterMap =
-  <A, B>(f: (value: A, index: number) => Option<B>): Operator<A, B> =>
-  (source) =>
-    observable((sink) => {
-      let index = 0;
-      return subscribeChild(source, sink, {
-        next: (a) => {
-          const ob = f(a, index++);
-          if (isSome(ob)) sink.next(ob.value);
-        },
-      });
-    });
 
 /** Emits the first `n` values, then completes. */
 export const take = <A>(n: number): Operator<A, A> =>
@@ -90,28 +71,6 @@ export const distinct =
             seen.add(k);
             sink.next(a);
           }
-        },
-      });
-    });
-
-/** Skips source values until `notifier` emits. */
-export const skipUntil =
-  <A>(notifier: Observable<unknown>): Operator<A, A> =>
-  (source) =>
-    observable((sink) => {
-      let open = false;
-      let n: Subscription | undefined;
-      n = subscribeChild(notifier, sink, {
-        next: () => {
-          open = true;
-          n?.unsubscribe();
-        },
-        complete: () => {},
-      });
-      if (open) n.unsubscribe();
-      return subscribeChild(source, sink, {
-        next: (a) => {
-          if (open) sink.next(a);
         },
       });
     });

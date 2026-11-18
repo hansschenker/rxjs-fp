@@ -5,6 +5,7 @@
  * `race`) and the concurrency vocabulary (`merge`, `concat`, `mergeMap`).
  *
  *   takeUntil(n)          merge the notifier and the source's end (both as "stop") into the source, stop at the first "stop"
+ *   skipUntil(n)          the same merge, but the notifier's first value opens a gate instead
  *   forkJoin(sources)     combineLatest of each source's last value
  *   startWith / endWith   concat with the values
  *   onErrorResumeNext     concat, each source with its error replaced by EMPTY
@@ -14,13 +15,13 @@
  * Built only on the kernel (checked by test/layering.test.ts), and each
  * definition confirmed against RxJS 7 by test/differential.test.ts.
  */
-import { catchError, combineLatest, EMPTY, filter, from, isSome, map, none, race, some, take, takeLast, takeWhile, zip } from '../kernel.js';
+import { catchError, combineLatest, EMPTY, filter, from, isSome, map, none, race, scan, some, take, takeLast, takeWhile, zip } from '../kernel.js';
 import type { Observable, ObservableInput, Operator, Option, ValueOf, ValuesOf } from '../kernel.js';
 import { concat, merge, mergeMap } from './concurrency.js';
 import { toArray } from './values.js';
 
 // The family's kernel members, so the family is importable from one place
-export { combineLatest, zip, withLatestFrom, race } from '../kernel.js';
+export { combineLatest, zip, withLatestFrom, race, sequenceEqual } from '../kernel.js';
 
 type Sources = readonly Observable<unknown>[];
 type InputValue<T extends readonly ObservableInput<unknown>[]> = T[number] extends ObservableInput<infer V> ? V : never;
@@ -116,3 +117,28 @@ export function partition<A>(source: ObservableInput<A>, predicate: (value: A, i
   const s = from(source);
   return [s.pipe(filter(predicate)), s.pipe(filter((a: A, i: number) => !predicate(a, i)))];
 }
+
+const OPEN: unique symbol = Symbol('rxjs-fp/open');
+type Gated<A> = typeof OPEN | Option<A>;
+type Gate<A> = { readonly open: boolean; readonly out: Option<A> };
+
+/**
+ * Drops source values until `notifier` emits, then mirrors the source. The
+ * mirror image of `takeUntil`: the notifier's first value opens a gate
+ * instead of stopping, and the source's end still stops.
+ */
+export const skipUntil =
+  <A>(notifier: Observable<unknown>): Operator<A, A> =>
+  (source) =>
+    merge(
+      notifier.pipe(take(1), map((): Gated<A> => OPEN)),
+      concat(source.pipe(map((a: A): Gated<A> => some(a))), from([none as Gated<A>])),
+    ).pipe(
+      takeWhile((x: Gated<A>) => x === OPEN || isSome(x)),
+      scan<Gated<A>, Gate<A>>((gate, x) => (x === OPEN ? { open: true, out: none } : { open: gate.open, out: gate.open ? x : none }), {
+        open: false,
+        out: none,
+      }),
+      filter((gate: Gate<A>) => isSome(gate.out)),
+      map((gate) => (gate.out as { readonly value: A }).value),
+    );

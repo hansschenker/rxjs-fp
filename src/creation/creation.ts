@@ -15,12 +15,8 @@ export type ObservableInput<A> =
 
 /** Completes immediately. */
 export const EMPTY: Observable<never> = observable((sink) => sink.complete());
-export const empty = (): Observable<never> => EMPTY;
-
 /** Never emits, never terminates. */
 export const NEVER: Observable<never> = observable(() => {});
-export const never = (): Observable<never> => NEVER;
-
 /** Errors immediately with the value produced by `factory` (evaluated per subscription). */
 export const throwError = (factory: () => unknown): Observable<never> =>
   observable((sink) => sink.error(factory()));
@@ -208,29 +204,6 @@ export interface DomEventTargetLike<E> {
 export interface NodeEventEmitterLike<E> {
   on(type: string | symbol, listener: (event: E) => void): unknown;
   off(type: string | symbol, listener: (event: E) => void): unknown;
-}
-
-export function fromEvent<K extends keyof HTMLElementEventMap>(target: HTMLElement, type: K, options?: boolean | AddEventListenerOptions): Observable<HTMLElementEventMap[K]>;
-export function fromEvent<K extends keyof WindowEventMap>(target: Window, type: K, options?: boolean | AddEventListenerOptions): Observable<WindowEventMap[K]>;
-export function fromEvent<K extends keyof DocumentEventMap>(target: Document, type: K, options?: boolean | AddEventListenerOptions): Observable<DocumentEventMap[K]>;
-export function fromEvent<E>(target: DomEventTargetLike<E>, type: string, options?: boolean | AddEventListenerOptions): Observable<E>;
-export function fromEvent<E>(target: NodeEventEmitterLike<E>, type: string | symbol): Observable<E>;
-export function fromEvent<E>(
-  target: DomEventTargetLike<E> | NodeEventEmitterLike<E>,
-  type: string | symbol,
-  options?: boolean | AddEventListenerOptions,
-): Observable<E> {
-  return observable<E>((sink) => {
-    const handler = (e: E): void => sink.next(e);
-    if ('addEventListener' in target) {
-      target.addEventListener(type as string, handler, options);
-      return () => target.removeEventListener(type as string, handler, options);
-    }
-    target.on(type, handler);
-    return () => {
-      target.off(type, handler);
-    };
-  });
 }
 
 /**

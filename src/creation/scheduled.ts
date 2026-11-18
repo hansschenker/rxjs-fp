@@ -52,37 +52,3 @@ export const scheduled = <A>(input: ObservableInput<A>, scheduler: Scheduler): O
   }
   return from(input).pipe(subscribeOn<A>(scheduler), observeOn<A>(scheduler));
 };
-
-/**
- * A `for` loop as an Observable:
- *
- *   for (let state = initial; condition(state); state = iterate(state)) emit(state)
- *
- * Pure functions in, values out. Map the states with `map`; for a loop that
- * runs forever, pass `() => true` and stop it with `take`. See also `unfold`.
- *
- * With a `scheduler`, each value is emitted in its own scheduler task
- * instead of synchronously.
- */
-export const generate = <S>(
-  initial: S,
-  condition: (state: S) => boolean,
-  iterate: (state: S) => S,
-  scheduler?: Scheduler,
-): Observable<S> => {
-  const states: Iterable<S> = {
-    [Symbol.iterator]: () => {
-      let state = initial;
-      let started = false;
-      return {
-        next: (): IteratorResult<S> => {
-          if (started) state = iterate(state);
-          started = true;
-          if (!condition(state)) return { done: true, value: undefined };
-          return { done: false, value: state };
-        },
-      };
-    },
-  };
-  return scheduler ? scheduleIterable(states, scheduler) : from(states);
-};

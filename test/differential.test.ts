@@ -3,6 +3,7 @@ import fc from 'fast-check';
 import * as rx from 'rxjs';
 import * as fp from '../src/index.js';
 import type { Observable } from '../src/index.js';
+import { none, some } from '../src/fp/index.js';
 import { completingMarbleArb, emittingMarbleArb, marbleArb, runOurs, runTheirs, RUNS, tagWindowsRx, type Input } from './differential.js';
 
 /**
@@ -639,5 +640,70 @@ describe('errors vocabulary matches RxJS (identity tests, docs/kernel.md)', () =
   prop1('exponentialBackoff', {
     ours: ({ a }, s) => a.pipe(fp.retryWith(fp.exponentialBackoff(3, 1), s)),
     theirs: ({ a }, s) => a.pipe(rx.retry({ count: 3, delay: (_e, n) => rx.timer(2 ** (n - 1), s) })),
+  });
+});
+
+describe('former outliers match RxJS (identity tests, docs/kernel.md)', () => {
+  prop1('pairwise', { ours: ({ a }) => a.pipe(fp.pairwise(), fp.map((p) => p.join(''))), theirs: ({ a }) => a.pipe(rx.pairwise(), rx.map((p) => p.join(''))) });
+  prop1('bufferCount / bufferCount every', {
+    ours: ({ a }) => fp.merge(a.pipe(fp.bufferCount(2), fp.map((b) => b.join(''))), a.pipe(fp.bufferCount(3, 1), fp.map((b) => `e${b.join('')}`))),
+    theirs: ({ a }) => rx.merge(a.pipe(rx.bufferCount(2), rx.map((b) => b.join(''))), a.pipe(rx.bufferCount(3, 1), rx.map((b) => `e${b.join('')}`))),
+  });
+  prop1('filterMap', {
+    ours: ({ a }) => a.pipe(fp.filterMap((x: string, i) => (x === 'c' ? none : some(`${x}${i}`)))),
+    theirs: ({ a }) => a.pipe(rx.map((x, i) => [x, i] as const), rx.filter(([x]) => x !== 'c'), rx.map(([x, i]) => `${x}${i}`)),
+  });
+  prop2('skipUntil', { ours: ({ a, b }) => a.pipe(fp.skipUntil(b)), theirs: ({ a, b }) => a.pipe(rx.skipUntil(b)) });
+  for (const [name, ours, theirs] of [
+    ['completes empty', () => fp.EMPTY, () => rx.EMPTY],
+    ['never closes', () => fp.NEVER, () => rx.NEVER],
+    ['errors', () => fp.throwError(() => 'closing'), () => rx.throwError(() => 'closing')],
+  ] as const)
+    prop2(`bufferToggle when the closing ${name}`, {
+      ours: ({ a, b }) => a.pipe(fp.bufferToggle(b, ours), fp.map((x) => x.join(''))),
+      theirs: ({ a, b }) => a.pipe(rx.bufferToggle(b, theirs), rx.map((x) => x.join(''))),
+    });
+  it('generate, with and without a scheduler', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: -2, max: 6 }), fc.boolean(), (n, withScheduler) => {
+        same({}, {
+          ours: (_, s) => fp.generate(0, (i) => i < n, (i) => i + 1, withScheduler ? s : undefined),
+          theirs: (_, s) => rx.generate(0, (i) => i < n, (i) => i + 1, withScheduler ? s : undefined),
+        });
+      }),
+      { numRuns: RUNS },
+    );
+  });
+  it('empty() and never()', () => {
+    same({}, { ours: () => fp.merge(fp.empty(), fp.of('x')), theirs: () => rx.merge(rx.EMPTY, rx.of('x')) });
+    same({}, { ours: (_, s) => fp.never().pipe(fp.takeUntil(fp.timer(3, undefined, s))), theirs: (_, s) => rx.NEVER.pipe(rx.takeUntil(rx.timer(3, s))) });
+  });
+  it('fromEvent on a Node-style emitter and a DOM-style target: same events, listener removed on unsubscribe', () => {
+    const nodeLike = () => {
+      const ls = new Set<(e: string) => void>();
+      return { ls, on: (_t: string | symbol, l: (e: string) => void) => ls.add(l), off: (_t: string | symbol, l: (e: string) => void) => ls.delete(l), emit: (e: string) => ls.forEach((l) => l(e)) };
+    };
+    const domLike = () => {
+      const ls = new Set<(e: string) => void>();
+      return { ls, addEventListener: (_t: string, l: (e: string) => void) => ls.add(l), removeEventListener: (_t: string, l: (e: string) => void) => ls.delete(l), emit: (e: string) => ls.forEach((l) => l(e)) };
+    };
+    for (const make of [nodeLike, domLike]) {
+      const run = (subscribe: (t: ReturnType<typeof make>, out: string[]) => { unsubscribe: () => void }) => {
+        const t = make();
+        const out: string[] = [];
+        t.emit('before');
+        const sub = subscribe(t, out);
+        const during = t.ls.size;
+        t.emit('a');
+        t.emit('b');
+        sub.unsubscribe();
+        t.emit('after');
+        return { out, during, after: t.ls.size };
+      };
+      const ours = run((t, out) => fp.fromEvent<string>(t as never, 'x').subscribe((e) => out.push(e)));
+      const theirs = run((t, out) => rx.fromEvent<string>(t as never, 'x').subscribe((e) => out.push(e)));
+      expect(ours).toEqual(theirs);
+      expect(ours).toEqual({ out: ['a', 'b'], during: 1, after: 0 });
+    }
   });
 });
