@@ -306,27 +306,9 @@ export const shareWith = <A>(connector: () => Subject<A>, lifecycle: ShareLifecy
     ? shareCore<A>(connector, true, true, true)
     : shareCore<A>(connector, true, false, false);
 
-/** Shares one source subscription while anyone listens; late subscribers see only later values. */
-export const share = <A>(): Operator<A, A> => shareWith<A>(createSubject, WhileSubscribed);
-
-/**
- * A cache: connects once, replays the last `bufferSize` values (default:
- * all) to every subscriber, and keeps them after completion and when nobody
- * listens. Starts over only after an error.
- */
-export const shareReplay = <A>(bufferSize: number = Number.POSITIVE_INFINITY): Operator<A, A> =>
-  shareWith<A>(() => createReplaySubject<A>(bufferSize), Cached);
-
-/**
- * Shares one source subscription while anyone listens, and gives every new
- * subscriber the latest value at once. Suits state streams.
- */
-export const shareLatest = <A>(): Operator<A, A> => shareWith<A>(() => createReplaySubject<A>(1), WhileSubscribed);
-
 // ---------------------------------------------------------------------------
 // connectable / connect: multicasting with an explicit connection
 // ---------------------------------------------------------------------------
-
 
 export interface Connectable<A> extends Observable<A> {
   /** Subscribes the shared Subject to the source (once; returns the running connection if there is one). */
@@ -390,33 +372,6 @@ export const connectableOnce = <A>(source: Observable<A>, connector: () => Subje
 // ---------------------------------------------------------------------------
 // publish family: named theaters, and refCount
 // ---------------------------------------------------------------------------
-
-/**
- * The theater view of multicasting: subscribers take their seats, nothing
- * runs until `connect()` raises the curtain, and then everyone seated sees
- * the show from the first value. Each `publish…` function is
- * `connectableOnce` with a different Subject behind the curtain, kept for
- * the theater's whole life, as RxJS's `publish()` keeps its Subject.
- *
- *   const show = publish(source);
- *   show.subscribe(a);
- *   show.subscribe(b);
- *   show.connect();
- *
- * Late arrivals see only what happens after they sit down.
- */
-export const publish = <A>(source: Observable<A>): Connectable<A> => connectableOnce(source, () => createSubject<A>());
-
-/** A theater where late arrivals first see the last `bufferSize` values (default: all). */
-export const publishReplay = <A>(source: Observable<A>, bufferSize: number = Number.POSITIVE_INFINITY): Connectable<A> =>
-  connectableOnce(source, () => createReplaySubject<A>(bufferSize));
-
-/** A theater where everyone sees the current value at once: `initial` before the first one. */
-export const publishBehavior = <A>(source: Observable<A>, initial: A): Connectable<A> =>
-  connectableOnce(source, () => createBehaviorSubject(initial));
-
-/** A theater that shows only the last value, when the source completes. */
-export const publishLast = <A>(source: Observable<A>): Connectable<A> => connectableOnce(source, () => createAsyncSubject<A>());
 
 /**
  * Connects automatically: the curtain rises when the first subscriber

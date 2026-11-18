@@ -17,8 +17,9 @@ export type { Scheduler } from './scheduler/scheduler.js';
 export { asyncScheduler } from './scheduler/scheduler.js';
 export { pipe, flow, identity } from './core/pipe.js';
 export { fromMachine } from './core/machine.js';
-export { emptyError, argumentOutOfRangeError } from './core/errors.js';
-export { some, none } from './fp/option.js';
+export { emptyError, argumentOutOfRangeError, isTimeoutError } from './core/errors.js';
+export type { TimeoutInfo } from './core/errors.js';
+export { some, none, isSome } from './fp/option.js';
 export type { Option } from './fp/option.js';
 
 // Creation
@@ -27,7 +28,7 @@ export { from, defer, EMPTY, NEVER, throwError, timer, unfold, fromEvent, using 
 
 // Value-based
 export { map, scan, reduce, tap } from './operators/transform.js';
-export { filter, take, takeLast, takeWhile, skipWhile, distinct, distinctUntilChanged, takeUntil } from './operators/filtering.js';
+export { filter, take, takeLast, takeWhile, skipWhile, distinct, distinctUntilChanged } from './operators/filtering.js';
 export { defaultIfEmpty } from './operators/transform.js';
 export { throwIfEmpty } from './operators/conditional.js';
 
@@ -45,7 +46,8 @@ export type { FlattenStrategy } from './operators/flatten.js';
 export { combineLatest, zip, withLatestFrom, race } from './operators/combine.js';
 
 // Errors and effects
-export { catchError, finalize } from './operators/error.js';
+export { catchError, finalize, retryWith, retryConsecutiveWith, repeat, retryNow, retryAfter, giveUp } from './operators/error.js';
+export type { RetryDecision, RetryPolicy } from './operators/error.js';
 
 // Multicasting
 export {
@@ -54,7 +56,11 @@ export {
   createReplaySubject,
   createAsyncSubject,
   connectable,
+  connectableOnce,
+  connect,
+  refCount,
   shareWith,
   WhileSubscribed,
   Cached,
 } from './subject/subject.js';
+export type { Subject, Connectable, ShareLifecycle } from './subject/subject.js';

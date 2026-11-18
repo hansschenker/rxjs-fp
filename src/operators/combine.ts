@@ -1,25 +1,6 @@
 import { observable, subscribeChild } from '../core/observable.js';
 import type { Observable, Operator, Subscription, ValueOf, ValuesOf } from '../core/types.js';
-import { EMPTY, from, type ObservableInput } from '../creation/creation.js';
-import { Concat, flatMapWith, Merge } from './flatten.js';
-import { reduce } from './transform.js';
-import { filter } from './filtering.js';
-
-/** Subscribes to the sources one after another (internal; the public `concat` is vocabulary). */
-const concatSources = <A>(...sources: ReadonlyArray<Observable<A>>): Observable<A> =>
-  flatMapWith(Concat)((s: Observable<A>) => s)(from(sources));
-
-/** Emits the given values first. */
-export const startWith =
-  <A, const V extends readonly unknown[]>(...values: V): Operator<A, A | V[number]> =>
-  (source) =>
-    concatSources<A | V[number]>(from(values), source);
-
-/** Emits the given values after the source completes. */
-export const endWith =
-  <A, const V extends readonly unknown[]>(...values: V): Operator<A, A | V[number]> =>
-  (source) =>
-    concatSources<A | V[number]>(source, from(values));
+import { EMPTY } from '../creation/creation.js';
 
 const runAll = <T extends readonly Observable<unknown>[]>(
   sources: T,
@@ -92,36 +73,6 @@ export const zip = <const T extends readonly Observable<unknown>[]>(sources: T):
         );
       });
 
-/** Waits for all sources to complete and emits the tuple of their last values. */
-export const forkJoin = <const T extends readonly Observable<unknown>[]>(sources: T): Observable<ValuesOf<T>> =>
-  sources.length === 0
-    ? EMPTY
-    : observable<ValuesOf<T>>((sink) => {
-        const n = sources.length;
-        const values: unknown[] = new Array(n);
-        const has: boolean[] = new Array(n).fill(false);
-        let completed = 0;
-        return runAll(sources, sink, (src, i) =>
-          subscribeChild(src, sink, {
-            next: (v) => {
-              has[i] = true;
-              values[i] = v;
-            },
-            complete: () => {
-              if (!has[i]) {
-                sink.complete();
-                return;
-              }
-              completed++;
-              if (completed === n) {
-                sink.next(values as ValuesOf<T>);
-                sink.complete();
-              }
-            },
-          }),
-        );
-      });
-
 /** Mirrors whichever source notifies first; the others are unsubscribed. */
 export const race = <const T extends readonly Observable<unknown>[]>(...sources: T): Observable<ValueOf<T[number]>> =>
   observable<ValueOf<T[number]>>((sink) => {
@@ -179,88 +130,3 @@ export const withLatestFrom =
       };
     });
 
-/** Operator form of `combineLatest`: `[source, ...others]`. */
-export const combineLatestWith =
-  <A, const T extends readonly Observable<unknown>[]>(...others: T): Operator<A, [A, ...ValuesOf<T>]> =>
-  (source) =>
-    combineLatest([source, ...others]) as unknown as Observable<[A, ...ValuesOf<T>]>;
-
-/** Operator form of `zip`: `[source, ...others]`. */
-export const zipWith =
-  <A, const T extends readonly Observable<unknown>[]>(...others: T): Operator<A, [A, ...ValuesOf<T>]> =>
-  (source) =>
-    zip([source, ...others]) as unknown as Observable<[A, ...ValuesOf<T>]>;
-
-/** Operator form of `race`: mirrors whichever of the source and `others` notifies first. */
-export const raceWith =
-  <A, const T extends readonly Observable<unknown>[]>(...others: T): Operator<A, A | ValueOf<T[number]>> =>
-  (source) =>
-    race(source, ...others);
-
-/**
- * Collects the source's inner Observables until it completes, then
- * subscribes to all of them with `combineLatest`.
- */
-export const combineLatestAll =
-  <A>(): Operator<ObservableInput<A>, A[]> =>
-  (source) =>
-    source.pipe(
-      reduce<ObservableInput<A>, ObservableInput<A>[]>((inputs, input) => [...inputs, input], []),
-      flatMapWith(Merge())((inputs: ObservableInput<A>[]) => combineLatest(inputs.map((i) => from(i))) as Observable<A[]>),
-    );
-
-/** Collects the source's inner Observables until it completes, then `zip`s them. */
-export const zipAll =
-  <A>(): Operator<ObservableInput<A>, A[]> =>
-  (source) =>
-    source.pipe(
-      reduce<ObservableInput<A>, ObservableInput<A>[]>((inputs, input) => [...inputs, input], []),
-      flatMapWith(Merge())((inputs: ObservableInput<A>[]) => zip(inputs.map((i) => from(i))) as Observable<A[]>),
-    );
-
-/**
- * Like `concat`, but moves on to the next source when one errors as well
- * as when it completes. Errors are dropped; the result always completes.
- */
-export const onErrorResumeNext = <const T extends readonly ObservableInput<unknown>[]>(
-  ...sources: T
-): Observable<T[number] extends ObservableInput<infer V> ? V : never> =>
-  observable((sink) => {
-    type V = T[number] extends ObservableInput<infer X> ? X : never;
-    let i = 0;
-    // Each source ends itself (error or complete) before the next starts,
-    // and every one is linked to `sink`, so nothing needs tracking here.
-    const subscribeNext = (): void => {
-      if (sink.closed) return;
-      if (i >= sources.length) {
-        sink.complete();
-        return;
-      }
-      const input = sources[i++] as ObservableInput<V>;
-      subscribeChild(from(input), sink, {
-        next: (v) => sink.next(v),
-        error: subscribeNext,
-        complete: subscribeNext,
-      });
-    };
-    subscribeNext();
-  });
-
-/** Operator form of `onErrorResumeNext`. */
-export const onErrorResumeNextWith =
-  <A, const T extends readonly ObservableInput<unknown>[]>(
-    ...sources: T
-  ): Operator<A, A | (T[number] extends ObservableInput<infer V> ? V : never)> =>
-  (source) =>
-    onErrorResumeNext(source, ...sources) as Observable<A | (T[number] extends ObservableInput<infer V> ? V : never)>;
-
-/** Splits a source into the values that satisfy `predicate` and those that do not (two cold Observables). */
-export function partition<A, B extends A>(
-  source: ObservableInput<A>,
-  predicate: (value: A, index: number) => value is B,
-): [Observable<B>, Observable<Exclude<A, B>>];
-export function partition<A>(source: ObservableInput<A>, predicate: (value: A, index: number) => boolean): [Observable<A>, Observable<A>];
-export function partition<A>(source: ObservableInput<A>, predicate: (value: A, index: number) => boolean): [Observable<A>, Observable<A>] {
-  const s = from(source);
-  return [s.pipe(filter(predicate)), s.pipe(filter((a: A, i: number) => !predicate(a, i)))];
-}

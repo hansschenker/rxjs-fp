@@ -50,6 +50,18 @@
       "types": "./dist/vocabulary/time.d.ts",
       "import": "./dist/vocabulary/time.js"
     },
+    "./combination": {
+      "types": "./dist/vocabulary/combination.d.ts",
+      "import": "./dist/vocabulary/combination.js"
+    },
+    "./errors": {
+      "types": "./dist/vocabulary/errors.d.ts",
+      "import": "./dist/vocabulary/errors.js"
+    },
+    "./multicast": {
+      "types": "./dist/vocabulary/multicast.d.ts",
+      "import": "./dist/vocabulary/multicast.js"
+    },
     "./fp": {
       "types": "./dist/fp/index.d.ts",
       "import": "./dist/fp/index.js"

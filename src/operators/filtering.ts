@@ -94,16 +94,6 @@ export const distinct =
       });
     });
 
-/** Mirrors the source until `notifier` emits, then completes. */
-export const takeUntil =
-  <A>(notifier: Observable<unknown>): Operator<A, A> =>
-  (source) =>
-    observable((sink) => {
-      subscribeChild(notifier, sink, { next: () => sink.complete(), complete: () => {} });
-      if (sink.closed) return;
-      return subscribeChild(source, sink);
-    });
-
 /** Skips source values until `notifier` emits. */
 export const skipUntil =
   <A>(notifier: Observable<unknown>): Operator<A, A> =>

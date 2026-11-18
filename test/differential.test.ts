@@ -577,3 +577,67 @@ describe('creation vocabulary matches RxJS (identity tests, docs/kernel.md)', ()
     },
   });
 });
+
+describe('combination vocabulary matches RxJS (identity tests, docs/kernel.md)', () => {
+  prop2('takeUntil', { ours: ({ a, b }) => a.pipe(fp.takeUntil(b)), theirs: ({ a, b }) => a.pipe(rx.takeUntil(b)) });
+  it('takeUntil: a notifier that emits at subscription stops the source before it is subscribed', () => {
+    const run = (subscribeTo: (onSubscribe: () => void) => { unsubscribe: () => void }) => {
+      let subscribed = false;
+      subscribeTo(() => (subscribed = true)).unsubscribe();
+      return subscribed;
+    };
+    const ours = run((on) => fp.defer(() => (on(), fp.of(1))).pipe(fp.takeUntil(fp.of('x'))).subscribe({}));
+    const theirs = run((on) => rx.defer(() => (on(), rx.of(1))).pipe(rx.takeUntil(rx.of('x'))).subscribe({}));
+    expect(ours).toBe(theirs);
+    expect(ours).toBe(false);
+  });
+  prop2('forkJoin', { ours: ({ a, b }) => fp.forkJoin([a, b]), theirs: ({ a, b }) => rx.forkJoin([a, b]) });
+  it('forkJoin of no sources completes at once', () => {
+    same({}, { ours: () => fp.forkJoin([]), theirs: () => rx.forkJoin([]) });
+  });
+  prop2('onErrorResumeNext / onErrorResumeNextWith', {
+    ours: ({ a, b }) => fp.merge(fp.onErrorResumeNext(a, b), a.pipe(fp.onErrorResumeNextWith(b), fp.map((v) => `w${v}`))),
+    theirs: ({ a, b }) => rx.merge(rx.onErrorResumeNext(a, b), a.pipe(rx.onErrorResumeNextWith(b), rx.map((v) => `w${v}`))),
+  });
+  // emitting inputs only for combineLatestWith: `combineLatest` deliberately completes
+  // early when an input completes without a value (see additions.test.ts)
+  prop2('combineLatestWith / zipWith / raceWith', {
+    ours: ({ a, b }) =>
+      fp.merge(a.pipe(fp.combineLatestWith(b), fp.map((t) => `c${t.join('')}`)), a.pipe(fp.zipWith(b), fp.map((t) => `z${t.join('')}`)),
+        a.pipe(fp.raceWith(b), fp.map((v) => `r${v}`))),
+    theirs: ({ a, b }) =>
+      rx.merge(a.pipe(rx.combineLatestWith(b), rx.map((t) => `c${t.join('')}`)), a.pipe(rx.zipWith(b), rx.map((t) => `z${t.join('')}`)),
+        a.pipe(rx.raceWith(b), rx.map((v) => `r${v}`))),
+  }, emittingMarbleArb(), emittingMarbleArb(8, 'xy'));
+  prop2('combineLatestAll / zipAll', {
+    ours: ({ a, b }) => {
+      const inners = a.pipe(fp.map((x) => b.pipe(fp.map((y) => x + y))));
+      return fp.merge(inners.pipe(fp.combineLatestAll<string>(), fp.map((t) => `c${t.join('')}`)), inners.pipe(fp.zipAll<string>(), fp.map((t) => `z${t.join('')}`)));
+    },
+    theirs: ({ a, b }) => {
+      const inners = a.pipe(rx.map((x) => b.pipe(rx.map((y) => x + y))));
+      return rx.merge(inners.pipe(rx.combineLatestAll(), rx.map((t) => `c${t.join('')}`)), inners.pipe(rx.zipAll(), rx.map((t) => `z${t.join('')}`)));
+    },
+  }, emittingMarbleArb(), emittingMarbleArb(8, 'xy'));
+  prop1('partition', {
+    ours: ({ a }) => {
+      const [cs, rest] = fp.partition(a, (x) => x === 'c');
+      return fp.merge(cs, rest.pipe(fp.map((v) => `r${v}`)));
+    },
+    theirs: ({ a }) => {
+      const [cs, rest] = rx.partition(a, (x) => x === 'c');
+      return rx.merge(cs, rest.pipe(rx.map((v) => `r${v}`)));
+    },
+  });
+});
+
+describe('errors vocabulary matches RxJS (identity tests, docs/kernel.md)', () => {
+  prop1('onErrorReturn', {
+    ours: ({ a }) => a.pipe(fp.onErrorReturn(() => 'fallback')),
+    theirs: ({ a }) => a.pipe(rx.catchError(() => rx.of('fallback'))),
+  });
+  prop1('exponentialBackoff', {
+    ours: ({ a }, s) => a.pipe(fp.retryWith(fp.exponentialBackoff(3, 1), s)),
+    theirs: ({ a }, s) => a.pipe(rx.retry({ count: 3, delay: (_e, n) => rx.timer(2 ** (n - 1), s) })),
+  });
+});

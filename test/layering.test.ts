@@ -9,6 +9,9 @@ import * as concurrency from '../src/vocabulary/concurrency.js';
 import * as time from '../src/vocabulary/time.js';
 import * as values from '../src/vocabulary/values.js';
 import * as creation from '../src/vocabulary/creation.js';
+import * as combination from '../src/vocabulary/combination.js';
+import * as errors from '../src/vocabulary/errors.js';
+import * as multicast from '../src/vocabulary/multicast.js';
 
 /**
  * The layering guard (docs/kernel.md):
@@ -65,7 +68,7 @@ describe('layering guard', () => {
   });
 
   it('family modules and the root export the same functions', () => {
-    const differ = Object.entries({ ...kernel, ...concurrency, ...time, ...values, ...creation }).filter(
+    const differ = Object.entries({ ...kernel, ...concurrency, ...time, ...values, ...creation, ...combination, ...errors, ...multicast }).filter(
       ([name, value]) => root[name] !== value,
     );
     expect(differ.map(([n]) => n)).toEqual([]);

@@ -58,6 +58,16 @@ RxJS's implementation has changed shape several times:
 
 The plan for reducing rxjs-fp to a small kernel, with every other operator defined as vocabulary on top of it, is in [docs/kernel.md](docs/kernel.md).
 
+Operators can be imported from the root or by family; both give the same functions:
+
+```ts
+import { from, of } from 'rxjs-fp/creation';
+import { concatMap } from 'rxjs-fp/concurrency';
+import { delay, debounceTime } from 'rxjs-fp/time';
+```
+
+The families are `rxjs-fp/kernel`, `/creation`, `/values`, `/time`, `/concurrency`, `/combination`, `/errors` and `/multicast`.
+
 The library source must not contain `class`, `this`, `instanceof`, `.prototype` or `new` on custom types. A test checks this on the TypeScript AST (`test/purity.test.ts`).
 
 ## Install and scripts

@@ -63,6 +63,9 @@ export * from './vocabulary/concurrency.js';
 export * from './vocabulary/time.js';
 export * from './vocabulary/values.js';
 export * from './vocabulary/creation.js';
+export * from './vocabulary/combination.js';
+export * from './vocabulary/errors.js';
+export * from './vocabulary/multicast.js';
 
 // conversion
 export * from './conversion.js';

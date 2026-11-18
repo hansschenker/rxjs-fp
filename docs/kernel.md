@@ -25,9 +25,11 @@ identity test (below) is correct by construction.
 
 ## The kernel
 
-A first, deliberately generous selection of about 40 operators (43 after adding `takeLast`,
-`defaultIfEmpty` and `throwIfEmpty`, which replace nine native implementations), to be trimmed towards 30 as the
-identity tests show which ones can become vocabulary.
+A first, deliberately generous selection, to be trimmed towards 30 as the identity tests show which
+ones can become vocabulary. It now stands at 48: `takeLast`, `defaultIfEmpty` and `throwIfEmpty` joined
+because they replace nine native implementations; `retryWith`, `retryConsecutiveWith`, `repeat`,
+`connectableOnce`, `connect` and `refCount` turned out not to be compositions; `takeUntil` left
+because it is one.
 
 ### Creation (10)
 
@@ -105,37 +107,52 @@ The same four strategies run through the time family. Applied to `timer(ms)`:
 | delay: every value waits in parallel | `Merge` |
 | spacing values out by `ms` | `Concat` |
 
-### Combination (5)
+### Combination (4)
 
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
 | `combineLatest` | combines the latest value of each input | `combineLatestWith`, `combineLatestAll` |
 | `zip` | pairs values by position | `zipWith`, `zipAll` |
 | `withLatestFrom` | adds the other inputs' latest values to each source value | |
-| `takeUntil` | completes when a notifier fires | |
 | `race` | follows whichever input emits first | `raceWith` |
 
-### Errors and effects (3)
+Vocabulary on top, together with the concurrency vocabulary: `takeUntil`, `forkJoin`, `startWith`,
+`endWith`, `onErrorResumeNext`, `onErrorResumeNextWith`, `partition`.
+
+`combineLatest` keeps one deliberate difference from RxJS 7: it completes as soon as an input
+completes without a value, since it can never emit after that (RxJS waits for all inputs).
+
+### Errors and effects (6)
 
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
-| `catchError` | replaces an error with another Observable | `retry`, `retryWith`, `retryConsecutiveWith`, `catchTimeout` |
+| `catchError` | replaces an error with another Observable | `catchTimeout`, `onErrorReturn` |
+| `retryWith(policy)` | resubscribes on error, as the policy decides: `retryNow`, `retryAfter(ms)`, `giveUp` | `retry`, with the policies `times`, `timesWithDelay`, `exponentialBackoff` |
+| `retryConsecutiveWith(policy)` | like `retryWith`, counting only errors since the last value | |
+| `repeat` | resubscribes on completion | |
 | `finalize` | runs a function on teardown | |
 | `tap` | runs a side effect per notification | |
 
-### Multicasting (3)
+The resubscribing operators could be written as recursion: a `catchError` whose handler returns
+the retried source. Values and timing would match RxJS, but each retry would add a subscription
+layer that lives until the stream ends, so a reconnect loop running for days would keep growing.
+They stay in the kernel, as loops.
+
+### Multicasting (6)
 
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
 | the Subjects | `createSubject`, `createBehaviorSubject`, `createReplaySubject`, `createAsyncSubject` | |
-| `connectable` | connects on `connect()`: the theater view | `connectableOnce`, `publish…`, `refCount` |
+| `connectable`, `connectableOnce` | connect on `connect()`: the theater view; `Once` cannot reconnect | `publish`, `publishReplay`, `publishBehavior`, `publishLast` |
+| `refCount` | connects a connectable while it has subscribers | |
+| `connect(selector)` | multicasts within one subscription | |
 | `shareWith(connector, lifecycle)` | connects automatically | `share`, `shareReplay`, `shareLatest` |
 
 ### Candidates for trimming towards 30
 
 - `EMPTY`, `NEVER` and `throwError` could count as one family of trivial sequences.
 - `observeOn` and `subscribeOn` are scheduling tools rather than stream behaviours.
-- `withLatestFrom`, `takeUntil` and `race` may turn out to be compositions.
+- `withLatestFrom` and `race` may still turn out to be compositions (`takeUntil` was one).
 - `using` is rarely needed.
 
 ## The vocabulary modules
@@ -174,10 +191,15 @@ Rules that keep the layering intact:
 | `rxjs-fp/time` | `src/vocabulary/time.ts` | done: `delay`, `emitAfter`, `debounceTime`, `throttleTime` and its variants, `throttleTimeWith`, `auditTime`, `sampleTime` |
 | `rxjs-fp/values` | `src/vocabulary/values.ts` | done: `as`, `withIndex`, `skip`, `ignoreElements`, `count`, `toArray`, `first`, `last`, `elementAt`, `find`, `findIndex`, `every`, `isEmpty`, `distinctUntilKeyChanged` |
 | `rxjs-fp/creation` | `src/vocabulary/creation.ts` | done: `of`, `range`, `interval`, `iif` |
-| combination, errors, multicast | | next |
+| `rxjs-fp/combination` | `src/vocabulary/combination.ts` | done: `takeUntil`, `forkJoin`, `startWith`, `endWith`, `onErrorResumeNext`, `combineLatestWith`, `zipWith`, `raceWith`, `onErrorResumeNextWith`, `combineLatestAll`, `zipAll`, `partition` |
+| `rxjs-fp/errors` | `src/vocabulary/errors.ts` | done: `retry`, `times`, `timesWithDelay`, `exponentialBackoff`, `catchTimeout`, `onErrorReturn` |
+| `rxjs-fp/multicast` | `src/vocabulary/multicast.ts` | done: `share`, `shareReplay`, `shareLatest`, `publish`, `publishReplay`, `publishBehavior`, `publishLast` |
 
 Outliers still implemented natively outside the kernel, to be handled later: `pairwise`, `skipLast`,
-`single`, `max`, `min`, `bufferCount`, `filterMap`, `generate`, `scheduled`.
+`single`, `max`, `min`, `bufferCount`, `filterMap`, `generate`, `scheduled`, `skipUntil`,
+`sequenceEqual`, `mergeScan`, `switchScan`, `delayWhen`, `timestamp`, `timeInterval`, the
+`buffer…`/`window…` variants and `groupBy`. They are exported from the root `rxjs-fp`, but not yet
+from a family module.
 
 `test/layering.test.ts` enforces the three rules: vocabulary imports only the kernel, the kernel never
 reaches the vocabulary (checked transitively), and the root exports the same functions as the
@@ -195,6 +217,12 @@ test:
    subscribers instead.
 3. If the outputs are identical, the operator is vocabulary. If not, it stays in the kernel, or the
    difference is documented as a deliberate one.
+4. Identical output is necessary, not sufficient: the composition must also use the same resources.
+   A recursive `retry` passes step 2 and still grows by one subscription layer per retry.
+
+A limit of the harness: the rxjs-fp and RxJS test schedulers order a hot and a cold event in the
+same frame differently (even a plain `merge` shows it), and rxjs-fp subscribes just after a hot
+value at frame 0. Identity tests therefore use cold inputs, or hot inputs that avoid those ties.
 
 Results so far:
 
@@ -213,6 +241,11 @@ Results so far:
 | `find`, `findIndex`, `every`, `isEmpty` | `filter` (or `map`), `take(1)`, `defaultIfEmpty` | identical |
 | `count`, `toArray` | `reduce`; `toArray` collects into a persistent list, so it stays pure and linear | identical |
 | `of`, `range`, `interval`, `iif` | `from`, `unfold`, `timer(ms, ms)`, `defer` | identical, including empty and negative `range` counts |
+| `takeUntil(n)` | `merge` of the notifier's first value and the source's end, both as "stop", into the source's values; `takeWhile` until "stop" | identical, including a notifier that fires at subscription (the source is never subscribed). Without the source's end as "stop" it waited for the notifier |
+| `forkJoin`, `startWith`, `endWith`, `onErrorResumeNext`, `…With`, `…All`, `partition` | `combineLatest` of `takeLast(1)`, `concat`, `catchError(() => EMPTY)`, `toArray` then `mergeMap` | identical |
+| `retry(n)`, `exponentialBackoff`, `catchTimeout`, `onErrorReturn` | `retryWith` with a policy, `catchError` | identical |
+| `retryWith`, `repeat` | recursion through `catchError` or `concat` | identical output, but grows by one subscription layer per resubscription: stays in the kernel |
+| `share…`, `publish…` | `shareWith` or `connectableOnce` with a Subject | identical in the scripted multi-subscriber scenarios |
 
 ## The naming style for pipelines
 

@@ -1,7 +1,6 @@
 import { observable, subscribeChild } from '../core/observable.js';
 import type { Observable, Operator, Subscription, Teardown } from '../core/types.js';
-import { from, throwError, timer, type ObservableInput } from '../creation/creation.js';
-import { isTimeoutError, type TimeoutInfo } from '../core/errors.js';
+import { from, timer, type ObservableInput } from '../creation/creation.js';
 import { asyncScheduler, type Scheduler } from '../scheduler/scheduler.js';
 
 /**
@@ -26,16 +25,6 @@ export const catchError =
   };
 
 /**
- * Recovers from a timeout only. On a `TimeoutError`, switches to
- * `handler(info)`, where `info` holds the values seen before the timeout;
- * any other error is passed on unchanged.
- *
- *   source.pipe(timeout(3000), catchTimeout(() => of(fallback)))
- */
-export const catchTimeout = <A, B>(handler: (info: TimeoutInfo<A>) => ObservableInput<B>): Operator<A, A | B> =>
-  catchError<A, B>((err) => (isTimeoutError(err) ? handler(err.info as TimeoutInfo<A>) : throwError(() => err)));
-
-/**
  * What a retry policy decides after an error. Decisions are data, like
  * flattening and throttle strategies:
  *
@@ -58,24 +47,6 @@ export const giveUp: RetryDecision = Object.freeze({ _tag: 'GiveUp' });
  * `policy(new Error('x'), 1)`.
  */
 export type RetryPolicy = (error: unknown, attempt: number) => RetryDecision;
-
-/** Retries at once, up to `count` times. */
-export const times =
-  (count: number): RetryPolicy =>
-  (_error, attempt) =>
-    attempt <= count ? retryNow : giveUp;
-
-/** Retries up to `count` times, waiting `ms` before each retry. */
-export const timesWithDelay =
-  (count: number, ms: number): RetryPolicy =>
-  (_error, attempt) =>
-    attempt <= count ? retryAfter(ms) : giveUp;
-
-/** Retries up to `count` times, waiting `initialMs`, then twice as long before each further retry. */
-export const exponentialBackoff =
-  (count: number, initialMs: number): RetryPolicy =>
-  (_error, attempt) =>
-    attempt <= count ? retryAfter(initialMs * 2 ** (attempt - 1)) : giveUp;
 
 /**
  * Shared by `retryWith` and `retryConsecutiveWith`. On an error, asks the
@@ -135,9 +106,6 @@ export const retryWith = <A>(policy: RetryPolicy, scheduler: Scheduler = asyncSc
 export const retryConsecutiveWith = <A>(policy: RetryPolicy, scheduler: Scheduler = asyncScheduler): Operator<A, A> =>
   retryCore<A>(policy, true, scheduler);
 
-/** Resubscribes at once when the source errors, up to `count` times (default: forever). */
-export const retry = <A>(count: number = Number.POSITIVE_INFINITY): Operator<A, A> => retryWith<A>(times(count));
-
 /** Resubscribes on completion, `count` times in total (default: forever). */
 export const repeat =
   <A>(count: number = Number.POSITIVE_INFINITY, delayMs?: number, scheduler: Scheduler = asyncScheduler): Operator<A, A> =>
@@ -179,7 +147,3 @@ export const finalize =
         f();
       };
     });
-
-/** Errors become a fallback value, then complete. */
-export const onErrorReturn = <A, B>(fallback: (err: unknown) => B): Operator<A, A | B> =>
-  catchError<A, B>((err) => [fallback(err)]);
