@@ -59,5 +59,7 @@ export * from './operators/group.js';
 // multicasting
 export * from './subject/subject.js';
 
+export * from './vocabulary/concurrency.js';
+
 // conversion
 export * from './conversion.js';

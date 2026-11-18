@@ -157,6 +157,19 @@ Rules that keep the layering intact:
 - **Vocabulary definitions follow the naming style below.** The library's own source shows the
   style it recommends.
 
+### Status
+
+| Module | Source | State |
+| --- | --- | --- |
+| `rxjs-fp/kernel` | `src/kernel.ts` | done: re-exports the kernel plus the types and helpers vocabulary needs |
+| `rxjs-fp/concurrency` | `src/vocabulary/concurrency.ts` | done: `mergeMap`, `concatMap`, `switchMap`, `exhaustMap`, the four `…All`, `merge`, `concat`, `mergeWith`, `concatWith` |
+| `rxjs-fp/time` and the other families | | next |
+
+`test/layering.test.ts` enforces the three rules: vocabulary imports only the kernel, the kernel never
+reaches the vocabulary (checked transitively), and the root exports the same functions as the
+family modules. Kernel files that used a vocabulary operator internally (`delayWhen`,
+`combineLatestAll`, `zipAll`, `startWith`, `endWith`) now call `flatMapWith` directly.
+
 ## The identity test
 
 An operator moves from the kernel to the vocabulary only when its composition passes an identity

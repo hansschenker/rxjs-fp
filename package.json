@@ -30,6 +30,14 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./kernel": {
+      "types": "./dist/kernel.d.ts",
+      "import": "./dist/kernel.js"
+    },
+    "./concurrency": {
+      "types": "./dist/vocabulary/concurrency.d.ts",
+      "import": "./dist/vocabulary/concurrency.js"
+    },
     "./fp": {
       "types": "./dist/fp/index.d.ts",
       "import": "./dist/fp/index.js"

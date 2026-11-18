@@ -98,32 +98,6 @@ export const flatMapWith =
       });
     });
 
-/** Projects each value to an Observable and merges them (optionally bounded). */
-export const mergeMap = <A, B>(
-  project: (value: A, index: number) => ObservableInput<B>,
-  concurrent: number = Number.POSITIVE_INFINITY,
-): Operator<A, B> => flatMapWith(Merge(concurrent))(project);
-
-/** Projects each value to an Observable and concatenates them in order. */
-export const concatMap = <A, B>(project: (value: A, index: number) => ObservableInput<B>): Operator<A, B> =>
-  flatMapWith(Concat)(project);
-
-/** Projects each value to an Observable, cancelling the previous one. */
-export const switchMap = <A, B>(project: (value: A, index: number) => ObservableInput<B>): Operator<A, B> =>
-  flatMapWith(Switch)(project);
-
-/** Projects each value to an Observable, ignoring values while one is active. */
-export const exhaustMap = <A, B>(project: (value: A, index: number) => ObservableInput<B>): Operator<A, B> =>
-  flatMapWith(Exhaust)(project);
-
-const id = <X>(x: X): X => x;
-
-export const mergeAll = <B>(concurrent?: number): Operator<ObservableInput<B>, B> =>
-  mergeMap<ObservableInput<B>, B>(id, concurrent);
-export const concatAll = <B>(): Operator<ObservableInput<B>, B> => concatMap<ObservableInput<B>, B>(id);
-export const switchAll = <B>(): Operator<ObservableInput<B>, B> => switchMap<ObservableInput<B>, B>(id);
-export const exhaustAll = <B>(): Operator<ObservableInput<B>, B> => exhaustMap<ObservableInput<B>, B>(id);
-
 /**
  * Recursively projects every value: each emitted value is also fed back
  * into `project`. Emits all results; completes when nothing is left.

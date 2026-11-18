@@ -5,7 +5,7 @@ import type { Operator, Subscription, Teardown } from '../core/types.js';
 import { asyncScheduler, type Scheduler } from '../scheduler/scheduler.js';
 import type { ObservableInput } from '../creation/creation.js';
 import { subscribeInner, type Inner } from './inner.js';
-import { mergeMap } from './flatten.js';
+import { flatMapWith, Merge } from './flatten.js';
 import { take } from './filtering.js';
 import { as, map } from './transform.js';
 
@@ -544,10 +544,10 @@ export const sample =
 /**
  * Delays each value until `delayDurationSelector(value, index)` emits its
  * first value. A duration that completes without emitting drops the value.
- * Built from `mergeMap`, `take` and `as`, like RxJS 7.
+ * Built from `flatMapWith(Merge())`, `take` and `as`, like RxJS 7's `mergeMap` version.
  */
 export const delayWhen = <A>(delayDurationSelector: (value: A, index: number) => ObservableInput<unknown>): Operator<A, A> =>
-  mergeMap((a: A, i: number) => from(delayDurationSelector(a, i)).pipe(take(1), as(a)));
+  flatMapWith(Merge())((a: A, i: number) => from(delayDurationSelector(a, i)).pipe(take(1), as(a)));
 
 /** Pairs every value with the scheduler time at which it arrived. */
 export const timestamp = <A>(scheduler: Scheduler = asyncScheduler): Operator<A, { readonly value: A; readonly timestamp: number }> =>

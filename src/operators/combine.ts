@@ -1,41 +1,25 @@
 import { observable, subscribeChild } from '../core/observable.js';
 import type { Observable, Operator, Subscription, ValueOf, ValuesOf } from '../core/types.js';
 import { EMPTY, from, of, type ObservableInput } from '../creation/creation.js';
-import { concatAll, mergeAll, mergeMap } from './flatten.js';
+import { Concat, flatMapWith, Merge } from './flatten.js';
 import { toArray } from './transform.js';
 import { filter } from './filtering.js';
 
-/** Subscribes to all sources at once and interleaves their values. */
-export const merge = <const T extends readonly Observable<unknown>[]>(...sources: T): Observable<ValueOf<T[number]>> =>
-  mergeAll<ValueOf<T[number]>>()(from(sources as unknown as Observable<ValueOf<T[number]>>[]));
-
-/** Subscribes to the sources one after another. */
-export const concat = <const T extends readonly Observable<unknown>[]>(...sources: T): Observable<ValueOf<T[number]>> =>
-  concatAll<ValueOf<T[number]>>()(from(sources as unknown as Observable<ValueOf<T[number]>>[]));
-
-/** Operator form of `merge`. */
-export const mergeWith =
-  <A, const T extends readonly Observable<unknown>[]>(...others: T): Operator<A, A | ValueOf<T[number]>> =>
-  (source) =>
-    merge(source, ...others);
-
-/** Operator form of `concat`. */
-export const concatWith =
-  <A, const T extends readonly Observable<unknown>[]>(...others: T): Operator<A, A | ValueOf<T[number]>> =>
-  (source) =>
-    concat(source, ...others);
+/** Subscribes to the sources one after another (internal; the public `concat` is vocabulary). */
+const concatSources = <A>(...sources: ReadonlyArray<Observable<A>>): Observable<A> =>
+  flatMapWith(Concat)((s: Observable<A>) => s)(from(sources));
 
 /** Emits the given values first. */
 export const startWith =
   <A, const V extends readonly unknown[]>(...values: V): Operator<A, A | V[number]> =>
   (source) =>
-    concat(of(...values), source);
+    concatSources<A | V[number]>(of(...values), source);
 
 /** Emits the given values after the source completes. */
 export const endWith =
   <A, const V extends readonly unknown[]>(...values: V): Operator<A, A | V[number]> =>
   (source) =>
-    concat(source, of(...values));
+    concatSources<A | V[number]>(source, of(...values));
 
 const runAll = <T extends readonly Observable<unknown>[]>(
   sources: T,
@@ -222,7 +206,7 @@ export const combineLatestAll =
   (source) =>
     source.pipe(
       toArray(),
-      mergeMap((inputs) => combineLatest(inputs.map((i) => from(i))) as Observable<A[]>),
+      flatMapWith(Merge())((inputs: ObservableInput<A>[]) => combineLatest(inputs.map((i) => from(i))) as Observable<A[]>),
     );
 
 /** Collects the source's inner Observables until it completes, then `zip`s them. */
@@ -231,7 +215,7 @@ export const zipAll =
   (source) =>
     source.pipe(
       toArray(),
-      mergeMap((inputs) => zip(inputs.map((i) => from(i))) as Observable<A[]>),
+      flatMapWith(Merge())((inputs: ObservableInput<A>[]) => zip(inputs.map((i) => from(i))) as Observable<A[]>),
     );
 
 /**

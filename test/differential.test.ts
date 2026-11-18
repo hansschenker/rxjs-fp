@@ -417,3 +417,59 @@ describe('publish family matches RxJS', () => {
     );
   });
 });
+
+describe('concurrency vocabulary matches RxJS (identity tests, docs/kernel.md)', () => {
+  // Each value of `a` starts nested work: `b`, tagged with the value that started it.
+  prop2('mergeMap', {
+    ours: ({ a, b }) => a.pipe(fp.mergeMap((x: string) => b.pipe(fp.map((y) => x + y)))),
+    theirs: ({ a, b }) => a.pipe(rx.mergeMap((x) => b.pipe(rx.map((y) => x + y)))),
+  });
+  prop2('mergeMap with concurrent = 2', {
+    ours: ({ a, b }) => a.pipe(fp.mergeMap((x: string) => b.pipe(fp.map((y) => x + y)), 2)),
+    theirs: ({ a, b }) => a.pipe(rx.mergeMap((x) => b.pipe(rx.map((y) => x + y)), 2)),
+  });
+  prop2('concatMap', {
+    ours: ({ a, b }) => a.pipe(fp.concatMap((x: string) => b.pipe(fp.map((y) => x + y)))),
+    theirs: ({ a, b }) => a.pipe(rx.concatMap((x) => b.pipe(rx.map((y) => x + y)))),
+  });
+  prop2('switchMap', {
+    ours: ({ a, b }) => a.pipe(fp.switchMap((x: string) => b.pipe(fp.map((y) => x + y)))),
+    theirs: ({ a, b }) => a.pipe(rx.switchMap((x) => b.pipe(rx.map((y) => x + y)))),
+  });
+  prop2('exhaustMap', {
+    ours: ({ a, b }) => a.pipe(fp.exhaustMap((x: string) => b.pipe(fp.map((y) => x + y)))),
+    theirs: ({ a, b }) => a.pipe(rx.exhaustMap((x) => b.pipe(rx.map((y) => x + y)))),
+  });
+  prop2('mergeAll / concatAll / switchAll / exhaustAll', {
+    ours: ({ a, b }) => {
+      const inner = a.pipe(fp.map((x) => b.pipe(fp.map((y) => x + y))));
+      return fp.merge(
+        inner.pipe(fp.mergeAll<string>(), fp.map((v) => `m${v}`)),
+        inner.pipe(fp.concatAll<string>(), fp.map((v) => `c${v}`)),
+        inner.pipe(fp.switchAll<string>(), fp.map((v) => `s${v}`)),
+        inner.pipe(fp.exhaustAll<string>(), fp.map((v) => `e${v}`)),
+      );
+    },
+    theirs: ({ a, b }) => {
+      const inner = a.pipe(rx.map((x) => b.pipe(rx.map((y) => x + y))));
+      return rx.merge(
+        inner.pipe(rx.mergeAll(), rx.map((v) => `m${v}`)),
+        inner.pipe(rx.concatAll(), rx.map((v) => `c${v}`)),
+        inner.pipe(rx.switchAll(), rx.map((v) => `s${v}`)),
+        inner.pipe(rx.exhaustAll(), rx.map((v) => `e${v}`)),
+      );
+    },
+  });
+  prop2('merge / concat', {
+    ours: ({ a, b }) => fp.merge(fp.concat(a, b).pipe(fp.map((v) => `c${v}`)), fp.merge(a, b)),
+    theirs: ({ a, b }) => rx.merge(rx.concat(a, b).pipe(rx.map((v) => `c${v}`)), rx.merge(a, b)),
+  });
+  prop2('mergeWith / concatWith', {
+    ours: ({ a, b }) => fp.merge(a.pipe(fp.mergeWith(b)), a.pipe(fp.concatWith(b), fp.map((v) => `c${v}`))),
+    theirs: ({ a, b }) => rx.merge(a.pipe(rx.mergeWith(b)), a.pipe(rx.concatWith(b), rx.map((v) => `c${v}`))),
+  });
+  prop2('startWith / endWith (internal concat in combine.ts)', {
+    ours: ({ a }) => a.pipe(fp.startWith('s'), fp.endWith('e')),
+    theirs: ({ a }) => a.pipe(rx.startWith('s'), rx.endWith('e')),
+  });
+});
