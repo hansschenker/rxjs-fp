@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as rx from 'rxjs';
-import { from, map, of, toArray } from '../src/index.js';
-import { firstValueFrom, lastValueFrom, toAsyncIterable } from '../src/index.js';
+import { from, map, of, throwError, toArray } from '../src/index.js';
+import { firstValueFrom, firstValueFromOr, lastValueFrom, lastValueFromOr, toAsyncIterable } from '../src/index.js';
 import { collect } from './helpers.js';
 
 describe('interop with RxJS 7', () => {
@@ -32,7 +32,12 @@ describe('conversion', () => {
   it('firstValueFrom / lastValueFrom', async () => {
     await expect(firstValueFrom(of(1, 2, 3))).resolves.toBe(1);
     await expect(lastValueFrom(of(1, 2, 3))).resolves.toBe(3);
-    await expect(firstValueFrom(of<number[]>(), { defaultValue: 0 })).resolves.toBe(0);
+    await expect(firstValueFromOr(of<number[]>(), 0)).resolves.toBe(0);
+    await expect(firstValueFromOr(of(1, 2), 0)).resolves.toBe(1);
+    await expect(lastValueFromOr(of<number[]>(), 0)).resolves.toBe(0);
+    await expect(lastValueFromOr(of(1, 2), 0)).resolves.toBe(2);
+    await expect(firstValueFrom(of())).rejects.toMatchObject({ name: 'EmptyError' });
+    await expect(firstValueFromOr(throwError(() => 'boom'), 0)).rejects.toBe('boom');
     await expect(lastValueFrom(of())).rejects.toMatchObject({ name: 'EmptyError' });
   });
 

@@ -3,12 +3,8 @@ import type { Observable, Subscription } from './core/types.js';
 
 const NO_DEFAULT: unique symbol = Symbol('rxjs-fp/no-default');
 
-/** Resolves with the first value and unsubscribes. Rejects with `EmptyError` if none (and no default). */
-export function firstValueFrom<A>(source: Observable<A>): Promise<A>;
-export function firstValueFrom<A, D>(source: Observable<A>, config: { readonly defaultValue: D }): Promise<A | D>;
-export function firstValueFrom<A, D>(source: Observable<A>, config?: { readonly defaultValue: D }): Promise<A | D> {
-  const def: D | typeof NO_DEFAULT = config ? config.defaultValue : NO_DEFAULT;
-  return new Promise<A | D>((resolve, reject) => {
+const firstValueCore = <A, D>(source: Observable<A>, def: D | typeof NO_DEFAULT): Promise<A | D> =>
+  new Promise<A | D>((resolve, reject) => {
     let done = false;
     let sub: Subscription | undefined;
     sub = source.subscribe({
@@ -27,14 +23,9 @@ export function firstValueFrom<A, D>(source: Observable<A>, config?: { readonly 
     });
     if (done) sub.unsubscribe();
   });
-}
 
-/** Resolves with the last value on completion. Rejects with `EmptyError` if none (and no default). */
-export function lastValueFrom<A>(source: Observable<A>): Promise<A>;
-export function lastValueFrom<A, D>(source: Observable<A>, config: { readonly defaultValue: D }): Promise<A | D>;
-export function lastValueFrom<A, D>(source: Observable<A>, config?: { readonly defaultValue: D }): Promise<A | D> {
-  const def: D | typeof NO_DEFAULT = config ? config.defaultValue : NO_DEFAULT;
-  return new Promise<A | D>((resolve, reject) => {
+const lastValueCore = <A, D>(source: Observable<A>, def: D | typeof NO_DEFAULT): Promise<A | D> =>
+  new Promise<A | D>((resolve, reject) => {
     let has = false;
     let last: A | undefined;
     source.subscribe({
@@ -50,7 +41,20 @@ export function lastValueFrom<A, D>(source: Observable<A>, config?: { readonly d
       },
     });
   });
-}
+
+/** Resolves with the first value and unsubscribes. Rejects with `EmptyError` if the source completes empty. */
+export const firstValueFrom = <A>(source: Observable<A>): Promise<A> => firstValueCore<A, never>(source, NO_DEFAULT);
+
+/** Resolves with the first value and unsubscribes, or with `defaultValue` if the source completes empty. */
+export const firstValueFromOr = <A, D>(source: Observable<A>, defaultValue: D): Promise<A | D> =>
+  firstValueCore(source, defaultValue);
+
+/** Resolves with the last value on completion. Rejects with `EmptyError` if the source completes empty. */
+export const lastValueFrom = <A>(source: Observable<A>): Promise<A> => lastValueCore<A, never>(source, NO_DEFAULT);
+
+/** Resolves with the last value on completion, or with `defaultValue` if the source completes empty. */
+export const lastValueFromOr = <A, D>(source: Observable<A>, defaultValue: D): Promise<A | D> =>
+  lastValueCore(source, defaultValue);
 
 /** Consumes the source as an async iterable (buffers values that arrive between pulls). */
 export const toAsyncIterable = <A>(source: Observable<A>): AsyncIterable<A> => ({

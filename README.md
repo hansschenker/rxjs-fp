@@ -54,7 +54,7 @@ RxJS's implementation has changed shape several times:
    - A different behaviour is a different operator: `timeoutFirst`, `bufferTimeOrCount`, `groupByUntil`.
    - Behaviour passed in is a function argument: a `groupBy` connector, a fallback in `catchTimeout`, a retry policy.
    - A decision is a pure function returning data: a retry policy `(error, attempt) => retryNow | retryAfter(ms) | giveUp`.
-   - No operator takes a config object. Still open outside the operators: `firstValueFrom` and `lastValueFrom` accept `{ defaultValue }`.
+   - No function takes a config object, operators and conversions alike.
 
 The plan for reducing rxjs-fp to a small kernel, with every other operator defined as vocabulary on top of it, is in [docs/kernel.md](docs/kernel.md).
 
@@ -86,10 +86,10 @@ Entry points: `rxjs-fp` (core and operators), `rxjs-fp/fp` (Option, Either, type
 | **Conditional** | `every`, `find`, `findIndex`, `isEmpty`, `sequenceEqual`, `throwIfEmpty`, `defaultIfEmpty` |
 | **Flattening** | `flatMapWith(strategy)`, `mergeMap`, `concatMap`, `switchMap`, `exhaustMap`, `*All`, `expand`, `mergeScan`, `switchScan` |
 | **Combination** | `merge`, `concat`, `combineLatest`, `zip`, `forkJoin` (all tuple-typed), `race`, `onErrorResumeNext`, `withLatestFrom`, `startWith`, `endWith`, `*With` (incl. `raceWith`, `onErrorResumeNextWith`), `combineLatestAll`, `zipAll` |
-| **Time** | `delay`, `delayWhen`, `debounceTime`, `debounce`, `throttle` and `throttleTime` (+ `Trailing`, `LeadingAndTrailing`; `throttleWith`, `throttleTimeWith`), `auditTime`, `audit`, `sampleTime`, `sample`, `timeout`, `timeoutFirst`, `timeoutFirstAndEach`, `subscribeOn`, `observeOn` |
+| **Time** | `delay`, `emitAfter`, `delayWhen`, `debounceTime`, `debounce`, `throttle` and `throttleTime` (+ `Trailing`, `LeadingAndTrailing`; `throttleWith`, `throttleTimeWith`), `auditTime`, `audit`, `sampleTime`, `sample`, `timeout`, `timeoutFirst`, `timeoutFirstAndEach`, `subscribeOn`, `observeOn` |
 | **Errors** | `catchError`, `catchTimeout`, `retry`, `retryWith` and `retryConsecutiveWith` (with policies `times`, `timesWithDelay`, `exponentialBackoff`), `repeat`, `finalize`, `onErrorReturn`; error values `emptyError`, `timeoutError`, `notFoundError`, `sequenceError`, … with `is*` guards |
 | **Multicasting** | `createSubject`, `createBehaviorSubject`, `createReplaySubject`, `createAsyncSubject`, `share`, `shareReplay`, `shareLatest`, `shareWith(connector, WhileSubscribed | Cached)`, `connectable`, `connectableOnce`, `connect`, `publish`, `publishReplay`, `publishBehavior`, `publishLast`, `refCount` |
-| **Conversion** | `firstValueFrom`, `lastValueFrom`, `toAsyncIterable` |
+| **Conversion** | `firstValueFrom`, `firstValueFromOr`, `lastValueFrom`, `lastValueFromOr`, `toAsyncIterable` |
 | **Schedulers** | `asyncScheduler`, `asapScheduler`, `queueScheduler` (trampoline), `animationFrameScheduler`, `createVirtualScheduler` |
 
 ### Two views of multicasting
@@ -139,6 +139,8 @@ Known differences:
   | `share({ connector: () => new ReplaySubject(1) })` | `shareLatest()` |
   | `shareReplay({ bufferSize, windowTime })` | `shareWith(() => createReplaySubject(bufferSize, windowTime), Cached)` |
   | `connectable(source, { resetOnDisconnect: false })` | `connectableOnce(source)` |
+  | `firstValueFrom(source, { defaultValue })` | `firstValueFromOr(source, defaultValue)` |
+  | `lastValueFrom(source, { defaultValue })` | `lastValueFromOr(source, defaultValue)` |
 
   Edge case: RxJS's `shareReplay({ refCount: true })` keeps its replay buffer after the source completes but disconnects when nobody listens. That combination has no lifecycle value; `shareLatest()` covers it for sources that never complete, such as state streams.
 
