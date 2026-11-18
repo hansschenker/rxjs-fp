@@ -5,6 +5,7 @@ import ts from 'typescript';
 import * as root from '../src/index.js';
 import * as kernel from '../src/kernel.js';
 import * as concurrency from '../src/vocabulary/concurrency.js';
+import * as time from '../src/vocabulary/time.js';
 
 /**
  * The layering guard (docs/kernel.md):
@@ -59,7 +60,7 @@ describe('layering guard', () => {
   });
 
   it('family modules and the root export the same functions', () => {
-    const differ = Object.entries({ ...kernel, ...concurrency }).filter(
+    const differ = Object.entries({ ...kernel, ...concurrency, ...time }).filter(
       ([name, value]) => (root as Record<string, unknown>)[name] !== value,
     );
     expect(differ.map(([n]) => n)).toEqual([]);

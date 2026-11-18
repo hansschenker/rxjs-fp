@@ -300,9 +300,9 @@ describe('time (virtual scheduler, injected)', () => {
     });
   });
 
-  it('sampleTime', () => {
+  it('sampleTime: a value and a tick in the same frame, the value is sampled (as RxJS)', () => {
     runMarbles(({ cold, scheduler, expectObservable }) => {
-      expectObservable(cold('ab-c-----|').pipe(sampleTime(3, scheduler))).toBe('---b--c--|');
+      expectObservable(cold('ab-c-----|').pipe(sampleTime(3, scheduler))).toBe('---c-----|');
     });
   });
 

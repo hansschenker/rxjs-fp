@@ -60,6 +60,7 @@ export * from './operators/group.js';
 export * from './subject/subject.js';
 
 export * from './vocabulary/concurrency.js';
+export * from './vocabulary/time.js';
 
 // conversion
 export * from './conversion.js';

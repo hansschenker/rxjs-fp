@@ -473,3 +473,26 @@ describe('concurrency vocabulary matches RxJS (identity tests, docs/kernel.md)',
     theirs: ({ a }) => a.pipe(rx.startWith('s'), rx.endWith('e')),
   });
 });
+
+describe('time vocabulary matches RxJS (identity tests, docs/kernel.md)', () => {
+  prop1('delay', { ours: ({ a }, s) => a.pipe(fp.delay(3, s)), theirs: ({ a }, s) => a.pipe(rx.delay(3, s)) });
+  prop1('debounceTime', { ours: ({ a }, s) => a.pipe(fp.debounceTime(2, s)), theirs: ({ a }, s) => a.pipe(rx.debounceTime(2, s)) });
+  prop1('throttleTime', { ours: ({ a }, s) => a.pipe(fp.throttleTime(3, s)), theirs: ({ a }, s) => a.pipe(rx.throttleTime(3, s)) });
+  prop1('throttleTimeTrailing', {
+    ours: ({ a }, s) => a.pipe(fp.throttleTimeTrailing(3, s)),
+    theirs: ({ a }, s) => a.pipe(rx.throttleTime(3, s, { leading: false, trailing: true })),
+  });
+  prop1('throttleTimeLeadingAndTrailing', {
+    ours: ({ a }, s) => a.pipe(fp.throttleTimeLeadingAndTrailing(3, s)),
+    theirs: ({ a }, s) => a.pipe(rx.throttleTime(3, s, { leading: true, trailing: true })),
+  });
+  prop1('auditTime', { ours: ({ a }, s) => a.pipe(fp.auditTime(3, s)), theirs: ({ a }, s) => a.pipe(rx.auditTime(3, s)) });
+  prop1('sampleTime (the tie-ordering fix)', {
+    ours: ({ a }, s) => a.pipe(fp.sampleTime(3, s)),
+    theirs: ({ a }, s) => a.pipe(rx.sampleTime(3, s)),
+  });
+  prop1('emitAfter as a projection: spacing values out with concatMap', {
+    ours: ({ a }, s) => a.pipe(fp.concatMap(fp.emitAfter(2, s))),
+    theirs: ({ a }, s) => a.pipe(rx.concatMap((x) => rx.timer(2, s).pipe(rx.map(() => x)))),
+  });
+});

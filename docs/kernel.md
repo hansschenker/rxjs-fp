@@ -163,7 +163,8 @@ Rules that keep the layering intact:
 | --- | --- | --- |
 | `rxjs-fp/kernel` | `src/kernel.ts` | done: re-exports the kernel plus the types and helpers vocabulary needs |
 | `rxjs-fp/concurrency` | `src/vocabulary/concurrency.ts` | done: `mergeMap`, `concatMap`, `switchMap`, `exhaustMap`, the four `…All`, `merge`, `concat`, `mergeWith`, `concatWith` |
-| `rxjs-fp/time` and the other families | | next |
+| `rxjs-fp/time` | `src/vocabulary/time.ts` | done: `delay`, `emitAfter`, `debounceTime`, `throttleTime` and its variants, `throttleTimeWith`, `auditTime`, `sampleTime` |
+| the other families | | next |
 
 `test/layering.test.ts` enforces the three rules: vocabulary imports only the kernel, the kernel never
 reaches the vocabulary (checked transitively), and the root exports the same functions as the
@@ -188,9 +189,9 @@ Results so far:
 | --- | --- | --- |
 | `debounceTime(ms)` | `debounce(() => timer(ms))` | identical |
 | `debounceTime(ms)` | `switchMap(emitAfter(ms))` | differs: does not flush the pending value on completion, so `debounce` is the better base |
-| `throttleTime(ms)` | `throttle(() => timer(ms))` | identical |
+| `throttleTime(ms)` and its variants | `throttleWith(strategy)(() => timer(ms))` | identical |
 | `auditTime(ms)` | `audit(() => timer(ms))` | identical |
-| `sampleTime(ms)` | `sample(interval(ms))` | RxJS defines `sampleTime` this way; rxjs-fp's own `sampleTime` deviates from RxJS when a tick and a value fall in the same frame |
+| `sampleTime(ms)` | `sample(interval(ms))` | identical. RxJS defines `sampleTime` this way; rxjs-fp's former native version emitted the previous value when a tick and a value fell in the same frame, and the composition fixed that |
 | `delay(ms)` | `mergeMap(emitAfter(ms))` | identical on the tested diagrams |
 | `skip(n)` | `skipWhile((_, i) => i < n)` | identical |
 | `distinct()` | `distinct((x) => x)` | identical |

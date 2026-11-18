@@ -38,6 +38,10 @@
       "types": "./dist/vocabulary/concurrency.d.ts",
       "import": "./dist/vocabulary/concurrency.js"
     },
+    "./time": {
+      "types": "./dist/vocabulary/time.d.ts",
+      "import": "./dist/vocabulary/time.js"
+    },
     "./fp": {
       "types": "./dist/fp/index.d.ts",
       "import": "./dist/fp/index.js"
