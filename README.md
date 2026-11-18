@@ -56,6 +56,8 @@ RxJS's implementation has changed shape several times:
    - A decision is a pure function returning data: a retry policy `(error, attempt) => retryNow | retryAfter(ms) | giveUp`.
    - No operator takes a config object. Still open outside the operators: `firstValueFrom` and `lastValueFrom` accept `{ defaultValue }`.
 
+The plan for reducing rxjs-fp to a small kernel, with every other operator defined as vocabulary on top of it, is in [docs/kernel.md](docs/kernel.md).
+
 The library source must not contain `class`, `this`, `instanceof`, `.prototype` or `new` on custom types. A test checks this on the TypeScript AST (`test/purity.test.ts`).
 
 ## Install and scripts
