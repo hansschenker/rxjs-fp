@@ -25,7 +25,8 @@ identity test (below) is correct by construction.
 
 ## The kernel
 
-A first, deliberately generous selection of about 40 operators, to be trimmed towards 30 as the
+A first, deliberately generous selection of about 40 operators (43 after adding `takeLast`,
+`defaultIfEmpty` and `throwIfEmpty`, which replace nine native implementations), to be trimmed towards 30 as the
 identity tests show which ones can become vocabulary.
 
 ### Creation (10)
@@ -33,29 +34,36 @@ identity tests show which ones can become vocabulary.
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
 | `observable` | the constructor: a producer function | everything else |
-| `from` | adopts any input: array, Promise, iterable, Observable | `of`, `scheduled` |
+| `from` | adopts any input: array, Promise, iterable, Observable | `of` |
 | `defer` | creates the Observable per subscription | `iif` |
 | `EMPTY`, `NEVER`, `throwError` | the three trivial sequences | |
-| `timer` | a value after a delay, optionally repeating | `interval` |
-| `unfold` | generates values from a seed with a pure function | `generate`, `range` |
+| `timer` | a value after a delay, optionally repeating | `interval`, and every `…Time` operator |
+| `unfold` | generates values from a seed with a pure function | `range` |
 | `fromEvent` | adapts DOM or Node events | `fromEventPattern`, `bindCallback` |
 | `using` | ties a resource to the subscription's lifetime | |
 
-### Value-based (9)
+### Value-based (12)
 
 All of these are machines run by `fromMachine`, the one primitive behind the family.
 
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
-| `map` | transforms each value | `as`, `timestamp` |
-| `filter` | keeps values that pass a test | `filterMap`, `ignoreElements` |
-| `scan` | accumulates, emitting every state | `pairwise`, `count` |
-| `reduce` | accumulates, emitting the final state | `toArray`, `max`, `min`, `takeLast` |
-| `take` | the first `n` values, completing with the `n`th | `first`, `elementAt` |
-| `takeWhile` | values while a test holds, completing when it fails | `find`, `findIndex` |
+| `map` | transforms each value | `as`, `withIndex` |
+| `filter` | keeps values that pass a test | `ignoreElements` |
+| `scan` | accumulates, emitting every state | |
+| `reduce` | accumulates, emitting the final state | `count`, `toArray` |
+| `take` | the first `n` values, completing with the `n`th | `first`, `elementAt`, `find`, `findIndex`, `every`, `isEmpty` |
+| `takeLast` | the last `n` values, on completion | `last` |
+| `defaultIfEmpty` | a fallback value if the source completes empty | `first`, `last`, `elementAt` with a default; `find`, `findIndex`, `every`, `isEmpty` |
+| `throwIfEmpty` | an error if the source completes empty | `first`, `last`, `elementAt` without a default |
+| `takeWhile` | values while a test holds, completing when it fails | |
 | `skipWhile` | drops values while a test holds | `skip` |
 | `distinct(key?)` | drops values seen before | |
 | `distinctUntilChanged` | drops a value equal to the previous one | `distinctUntilKeyChanged` |
+
+`first`, `elementAt`, `find`, `findIndex`, `every` and `isEmpty` are one sentence with three choices:
+pick the value with `filter` and `take(1)`, then say what an empty stream means with
+`defaultIfEmpty` or `throwIfEmpty`. RxJS 7 defines `first`, `last` and `elementAt` the same way.
 
 `take` and `takeWhile` stay separate: `take(n)` completes with its `n`th value, while
 `takeWhile((_, i) => i < n)` completes only when the next value arrives and fails the test.
@@ -164,7 +172,12 @@ Rules that keep the layering intact:
 | `rxjs-fp/kernel` | `src/kernel.ts` | done: re-exports the kernel plus the types and helpers vocabulary needs |
 | `rxjs-fp/concurrency` | `src/vocabulary/concurrency.ts` | done: `mergeMap`, `concatMap`, `switchMap`, `exhaustMap`, the four `…All`, `merge`, `concat`, `mergeWith`, `concatWith` |
 | `rxjs-fp/time` | `src/vocabulary/time.ts` | done: `delay`, `emitAfter`, `debounceTime`, `throttleTime` and its variants, `throttleTimeWith`, `auditTime`, `sampleTime` |
-| the other families | | next |
+| `rxjs-fp/values` | `src/vocabulary/values.ts` | done: `as`, `withIndex`, `skip`, `ignoreElements`, `count`, `toArray`, `first`, `last`, `elementAt`, `find`, `findIndex`, `every`, `isEmpty`, `distinctUntilKeyChanged` |
+| `rxjs-fp/creation` | `src/vocabulary/creation.ts` | done: `of`, `range`, `interval`, `iif` |
+| combination, errors, multicast | | next |
+
+Outliers still implemented natively outside the kernel, to be handled later: `pairwise`, `skipLast`,
+`single`, `max`, `min`, `bufferCount`, `filterMap`, `generate`, `scheduled`.
 
 `test/layering.test.ts` enforces the three rules: vocabulary imports only the kernel, the kernel never
 reaches the vocabulary (checked transitively), and the root exports the same functions as the
@@ -196,6 +209,10 @@ Results so far:
 | `skip(n)` | `skipWhile((_, i) => i < n)` | identical |
 | `distinct()` | `distinct((x) => x)` | identical |
 | `take(n)` | `takeWhile((_, i) => i < n)` | differs: completes later, so both stay in the kernel |
+| `first`, `last`, `elementAt` | `filter`, `take(1)` or `takeLast(1)`, then `defaultIfEmpty` or `throwIfEmpty` | identical, including the error names and messages |
+| `find`, `findIndex`, `every`, `isEmpty` | `filter` (or `map`), `take(1)`, `defaultIfEmpty` | identical |
+| `count`, `toArray` | `reduce`; `toArray` collects into a persistent list, so it stays pure and linear | identical |
+| `of`, `range`, `interval`, `iif` | `from`, `unfold`, `timer(ms, ms)`, `defer` | identical, including empty and negative `range` counts |
 
 ## The naming style for pipelines
 

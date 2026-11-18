@@ -34,6 +34,14 @@
       "types": "./dist/kernel.d.ts",
       "import": "./dist/kernel.js"
     },
+    "./creation": {
+      "types": "./dist/vocabulary/creation.d.ts",
+      "import": "./dist/vocabulary/creation.js"
+    },
+    "./values": {
+      "types": "./dist/vocabulary/values.d.ts",
+      "import": "./dist/vocabulary/values.js"
+    },
     "./concurrency": {
       "types": "./dist/vocabulary/concurrency.d.ts",
       "import": "./dist/vocabulary/concurrency.js"

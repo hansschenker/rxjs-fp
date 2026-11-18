@@ -17,6 +17,9 @@ export type { Scheduler } from './scheduler/scheduler.js';
 export { asyncScheduler } from './scheduler/scheduler.js';
 export { pipe, flow, identity } from './core/pipe.js';
 export { fromMachine } from './core/machine.js';
+export { emptyError, argumentOutOfRangeError } from './core/errors.js';
+export { some, none } from './fp/option.js';
+export type { Option } from './fp/option.js';
 
 // Creation
 export { observable } from './core/observable.js';
@@ -24,7 +27,9 @@ export { from, defer, EMPTY, NEVER, throwError, timer, unfold, fromEvent, using 
 
 // Value-based
 export { map, scan, reduce, tap } from './operators/transform.js';
-export { filter, take, takeWhile, skipWhile, distinct, distinctUntilChanged, takeUntil } from './operators/filtering.js';
+export { filter, take, takeLast, takeWhile, skipWhile, distinct, distinctUntilChanged, takeUntil } from './operators/filtering.js';
+export { defaultIfEmpty } from './operators/transform.js';
+export { throwIfEmpty } from './operators/conditional.js';
 
 // Time-based
 export { debounce, throttleWith, audit, sample, timeout, observeOn, subscribeOn } from './operators/time.js';

@@ -7,7 +7,7 @@ import type { ObservableInput } from '../creation/creation.js';
 import { subscribeInner, type Inner } from './inner.js';
 import { flatMapWith, Merge } from './flatten.js';
 import { take } from './filtering.js';
-import { as, map } from './transform.js';
+import { map } from './transform.js';
 
 /**
  * Time-based operators. Every one takes the Scheduler as an explicit last
@@ -349,7 +349,7 @@ export const sample =
  * Built from `flatMapWith(Merge())`, `take` and `as`, like RxJS 7's `mergeMap` version.
  */
 export const delayWhen = <A>(delayDurationSelector: (value: A, index: number) => ObservableInput<unknown>): Operator<A, A> =>
-  flatMapWith(Merge())((a: A, i: number) => from(delayDurationSelector(a, i)).pipe(take(1), as(a)));
+  flatMapWith(Merge())((a: A, i: number) => from(delayDurationSelector(a, i)).pipe(take(1), map(() => a)));
 
 /** Pairs every value with the scheduler time at which it arrived. */
 export const timestamp = <A>(scheduler: Scheduler = asyncScheduler): Operator<A, { readonly value: A; readonly timestamp: number }> =>

@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import ts from 'typescript';
-import * as root from '../src/index.js';
+import * as rootOnly from '../src/index.js';
+import * as fpEntry from '../src/fp/index.js';
 import * as kernel from '../src/kernel.js';
 import * as concurrency from '../src/vocabulary/concurrency.js';
 import * as time from '../src/vocabulary/time.js';
+import * as values from '../src/vocabulary/values.js';
+import * as creation from '../src/vocabulary/creation.js';
 
 /**
  * The layering guard (docs/kernel.md):
@@ -13,9 +16,11 @@ import * as time from '../src/vocabulary/time.js';
  * 1. Vocabulary modules import only from the kernel entry point (or from
  *    another vocabulary module). Type imports count too.
  * 2. The kernel never reaches the vocabulary, directly or transitively.
- * 3. The root entry point exports the very same functions as the family
- *    modules, so importing by family or from the root is interchangeable.
+ * 3. The public entry points (`rxjs-fp`, and `rxjs-fp/fp` for the Option
+ *    helpers) export the very same functions as the family modules, so
+ *    importing by family or from the root is interchangeable.
  */
+const root: Record<string, unknown> = { ...fpEntry, ...rootOnly };
 const SRC = resolve('src');
 const VOCAB = join(SRC, 'vocabulary');
 
@@ -60,8 +65,8 @@ describe('layering guard', () => {
   });
 
   it('family modules and the root export the same functions', () => {
-    const differ = Object.entries({ ...kernel, ...concurrency, ...time }).filter(
-      ([name, value]) => (root as Record<string, unknown>)[name] !== value,
+    const differ = Object.entries({ ...kernel, ...concurrency, ...time, ...values, ...creation }).filter(
+      ([name, value]) => root[name] !== value,
     );
     expect(differ.map(([n]) => n)).toEqual([]);
   });

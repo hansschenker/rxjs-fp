@@ -1,5 +1,6 @@
 import type { Observable, Operator } from '../core/types.js';
-import { EMPTY, of, throwError } from '../creation/creation.js';
+import { EMPTY, throwError } from '../creation/creation.js';
+import { of } from '../vocabulary/creation.js';
 import { map } from '../operators/transform.js';
 import { filter as filterOp, filterMap as filterMapOp } from '../operators/filtering.js';
 import { concat, concatMap, merge, mergeMap } from '../vocabulary/concurrency.js';

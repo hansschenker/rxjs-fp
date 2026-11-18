@@ -1,8 +1,8 @@
 import { observable, subscribeChild } from '../core/observable.js';
 import type { Observable, Operator, Subscription, ValueOf, ValuesOf } from '../core/types.js';
-import { EMPTY, from, of, type ObservableInput } from '../creation/creation.js';
+import { EMPTY, from, type ObservableInput } from '../creation/creation.js';
 import { Concat, flatMapWith, Merge } from './flatten.js';
-import { toArray } from './transform.js';
+import { reduce } from './transform.js';
 import { filter } from './filtering.js';
 
 /** Subscribes to the sources one after another (internal; the public `concat` is vocabulary). */
@@ -13,13 +13,13 @@ const concatSources = <A>(...sources: ReadonlyArray<Observable<A>>): Observable<
 export const startWith =
   <A, const V extends readonly unknown[]>(...values: V): Operator<A, A | V[number]> =>
   (source) =>
-    concatSources<A | V[number]>(of(...values), source);
+    concatSources<A | V[number]>(from(values), source);
 
 /** Emits the given values after the source completes. */
 export const endWith =
   <A, const V extends readonly unknown[]>(...values: V): Operator<A, A | V[number]> =>
   (source) =>
-    concatSources<A | V[number]>(source, of(...values));
+    concatSources<A | V[number]>(source, from(values));
 
 const runAll = <T extends readonly Observable<unknown>[]>(
   sources: T,
@@ -205,7 +205,7 @@ export const combineLatestAll =
   <A>(): Operator<ObservableInput<A>, A[]> =>
   (source) =>
     source.pipe(
-      toArray(),
+      reduce<ObservableInput<A>, ObservableInput<A>[]>((inputs, input) => [...inputs, input], []),
       flatMapWith(Merge())((inputs: ObservableInput<A>[]) => combineLatest(inputs.map((i) => from(i))) as Observable<A[]>),
     );
 
@@ -214,7 +214,7 @@ export const zipAll =
   <A>(): Operator<ObservableInput<A>, A[]> =>
   (source) =>
     source.pipe(
-      toArray(),
+      reduce<ObservableInput<A>, ObservableInput<A>[]>((inputs, input) => [...inputs, input], []),
       flatMapWith(Merge())((inputs: ObservableInput<A>[]) => zip(inputs.map((i) => from(i))) as Observable<A[]>),
     );
 

@@ -13,16 +13,6 @@ export type ObservableInput<A> =
   | AsyncIterable<A>
   | ArrayLike<A>;
 
-/** Emits the given values synchronously, then completes. */
-export const of = <T extends readonly unknown[]>(...values: T): Observable<T[number]> =>
-  observable((sink) => {
-    for (const v of values) {
-      if (sink.closed) return;
-      sink.next(v);
-    }
-    sink.complete();
-  });
-
 /** Completes immediately. */
 export const EMPTY: Observable<never> = observable((sink) => sink.complete());
 export const empty = (): Observable<never> => EMPTY;
@@ -172,13 +162,6 @@ export const from = <A>(input: ObservableInput<A>): Observable<A> => {
   return throwError(() => new TypeError(`rxjs-fp: cannot convert ${String(input)} to an Observable`));
 };
 
-/** Emits `count` consecutive integers starting at `start`. */
-export const range = (start: number, count: number): Observable<number> =>
-  observable((sink) => {
-    for (let i = 0; i < count && !sink.closed; i++) sink.next(start + i);
-    sink.complete();
-  });
-
 /**
  * The anamorphism: unfolds a sequence from a seed with a *pure* function.
  * `f(seed)` returns `some([value, nextSeed])` to emit, or `none` to complete.
@@ -196,10 +179,6 @@ export const unfold = <S, A>(seed: S, f: (s: S) => Option<readonly [A, S]>): Obs
     sink.complete();
   });
 
-/** Emits 0, 1, 2, … every `period` ms. */
-export const interval = (period: number, scheduler: Scheduler = asyncScheduler): Observable<number> =>
-  timer(period, period, scheduler);
-
 /**
  * After `dueTime` ms emits 0; then, if `period` is given, 1, 2, … every
  * `period` ms. Rescheduling is recursive through the scheduler.
@@ -216,10 +195,6 @@ export const timer = (dueTime: number, period?: number, scheduler: Scheduler = a
     cancel = scheduler.schedule(tick, Math.max(0, dueTime));
     return () => cancel();
   });
-
-/** Chooses between two Observables at subscription time. */
-export const iif = <A, B>(condition: () => boolean, onTrue: ObservableInput<A>, onFalse: ObservableInput<B>): Observable<A | B> =>
-  defer<A | B>(() => (condition() ? onTrue : onFalse));
 
 // ---------------------------------------------------------------------------
 // fromEvent

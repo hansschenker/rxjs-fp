@@ -1,5 +1,5 @@
 import { observable } from '../core/observable.js';
-import { cont, flushError, flushWith, fromMachine, halt } from '../core/machine.js';
+import { cont, flushError, flushWith, fromMachine } from '../core/machine.js';
 import { emptyError, notFoundError, sequenceError } from '../core/errors.js';
 import type { Observable, Operator } from '../core/types.js';
 import { identity } from '../core/pipe.js';
@@ -12,41 +12,6 @@ import { subscribeInner } from './inner.js';
  * Almost all of them are pure Mealy machines: the decision logic lives in
  * `step` and `flush`, and can be tested with `runMachine` alone.
  */
-
-/** Emits `true` if every value satisfies `predicate`; `false` (and completes) at the first one that does not. */
-export const every = <A>(predicate: (value: A, index: number) => boolean): Operator<A, boolean> =>
-  fromMachine<null, A, boolean>({
-    init: () => null,
-    step: (s, a, i) => (predicate(a, i) ? cont(s) : halt(s, [false])),
-    flush: () => flushWith([true]),
-  });
-
-/** Emits the first value matching `predicate` and completes; `undefined` if there is none. */
-export function find<A, B extends A>(predicate: (value: A, index: number) => value is B): Operator<A, B | undefined>;
-export function find<A>(predicate: (value: A, index: number) => boolean): Operator<A, A | undefined>;
-export function find<A>(predicate: (value: A, index: number) => boolean): Operator<A, A | undefined> {
-  return fromMachine<null, A, A | undefined>({
-    init: () => null,
-    step: (s, a, i) => (predicate(a, i) ? halt(s, [a]) : cont(s)),
-    flush: () => flushWith([undefined]),
-  });
-}
-
-/** Emits the index of the first value matching `predicate` and completes; `-1` if there is none. */
-export const findIndex = <A>(predicate: (value: A, index: number) => boolean): Operator<A, number> =>
-  fromMachine<null, A, number>({
-    init: () => null,
-    step: (s, a, i) => (predicate(a, i) ? halt(s, [i]) : cont(s)),
-    flush: () => flushWith([-1]),
-  });
-
-/** Emits `false` at the first value, or `true` if the source completes empty. */
-export const isEmpty = <A>(): Operator<A, boolean> =>
-  fromMachine<null, A, boolean>({
-    init: () => null,
-    step: (s) => halt(s, [false]),
-    flush: () => flushWith([true]),
-  });
 
 /** Errors with `factory()` (default: `EmptyError`) if the source completes without emitting. */
 export const throwIfEmpty = <A>(factory: () => unknown = emptyError): Operator<A, A> =>
@@ -64,16 +29,6 @@ export const skipLast = <A>(n: number): Operator<A, A> =>
         init: () => [],
         step: (buf, a) => (buf.length < n ? cont([...buf, a]) : cont([...buf.slice(1), a], [buf[0] as A])),
       });
-
-/** `distinctUntilChanged` on one property of the values. */
-export const distinctUntilKeyChanged = <A, K extends keyof A>(
-  key: K,
-  equals: (x: A[K], y: A[K]) => boolean = (x, y) => x === y,
-): Operator<A, A> =>
-  fromMachine<{ readonly has: boolean; readonly last: A[K] | undefined }, A, A>({
-    init: () => ({ has: false, last: undefined }),
-    step: (s, a) => (s.has && equals(s.last as A[K], a[key]) ? cont(s) : cont({ has: true, last: a[key] }, [a])),
-  });
 
 type SingleState<A> = { readonly seen: boolean; readonly match: { readonly value: A } | null };
 

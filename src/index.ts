@@ -61,6 +61,8 @@ export * from './subject/subject.js';
 
 export * from './vocabulary/concurrency.js';
 export * from './vocabulary/time.js';
+export * from './vocabulary/values.js';
+export * from './vocabulary/creation.js';
 
 // conversion
 export * from './conversion.js';

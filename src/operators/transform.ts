@@ -18,9 +18,6 @@ export const map =
       return subscribeChild(source, sink, { next: (a) => sink.next(f(a, index++)) });
     });
 
-/** Replaces every value with a constant. */
-export const as = <B>(value: B): Operator<unknown, B> => map(() => value);
-
 /** Like `reduce`, but emits every intermediate accumulation. */
 export const scan = <A, S>(f: (acc: S, value: A, index: number) => S, seed: S): Operator<A, S> =>
   fromMachine<S, A, S>({
@@ -59,14 +56,6 @@ export const bufferCount = <A>(size: number, every: number = size): Operator<A, 
     flush: (s) => flushWith(s.buffers.filter((b) => b.length > 0)),
   });
 
-/** Counts values (optionally only those matching `predicate`). */
-export const count = <A>(predicate: (value: A, index: number) => boolean = () => true): Operator<A, number> =>
-  fromMachine<number, A, number>({
-    init: () => 0,
-    step: (n, a, i) => cont(predicate(a, i) ? n + 1 : n),
-    flush: (n) => flushWith([n]),
-  });
-
 /** Emits `value` if the source completes without emitting. */
 export const defaultIfEmpty = <A, B>(value: B): Operator<A, A | B> =>
   fromMachine<boolean, A, A | B>({
@@ -74,27 +63,6 @@ export const defaultIfEmpty = <A, B>(value: B): Operator<A, A | B> =>
     step: (_seen, a) => cont(true, [a]),
     flush: (seen) => flushWith(seen ? [] : [value]),
   });
-
-/** Collects all values into one array, emitted on completion. */
-export const toArray =
-  <A>(): Operator<A, A[]> =>
-  (source) =>
-    observable((sink) => {
-      const acc: A[] = []; // essential per-subscription state, local to the shell
-      return subscribeChild(source, sink, {
-        next: (a) => {
-          acc.push(a);
-        },
-        complete: () => {
-          sink.next(acc);
-          sink.complete();
-        },
-      });
-    });
-
-/** Pairs every value with its index as `{ index, value }`. */
-export const withIndex = <A>(): Operator<A, { readonly index: number; readonly value: A }> =>
-  map((value, index) => ({ index, value }));
 
 /** Performs side effects for notifications without changing the stream. */
 export const tap =

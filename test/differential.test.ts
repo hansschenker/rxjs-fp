@@ -496,3 +496,84 @@ describe('time vocabulary matches RxJS (identity tests, docs/kernel.md)', () => 
     theirs: ({ a }, s) => a.pipe(rx.concatMap((x) => rx.timer(2, s).pipe(rx.map(() => x)))),
   });
 });
+
+describe('values vocabulary matches RxJS (identity tests, docs/kernel.md)', () => {
+  const isC = (x: string) => x === 'c';
+  prop1('as / withIndex', {
+    ours: ({ a }) => fp.merge(a.pipe(fp.as('z')), a.pipe(fp.withIndex(), fp.map(({ index, value }) => `${index}${value}`))),
+    theirs: ({ a }) => rx.merge(a.pipe(rx.map(() => 'z')), a.pipe(rx.map((value, index) => `${index}${value}`))),
+  });
+  prop1('skip', { ours: ({ a }) => a.pipe(fp.skip(2)), theirs: ({ a }) => a.pipe(rx.skip(2)) });
+  prop1('ignoreElements', { ours: ({ a }) => a.pipe(fp.ignoreElements()), theirs: ({ a }) => a.pipe(rx.ignoreElements()) });
+  prop1('count / count with predicate', {
+    ours: ({ a }) => fp.merge(a.pipe(fp.count()), a.pipe(fp.count(isC), fp.map((n) => `c${n}`))),
+    theirs: ({ a }) => rx.merge(a.pipe(rx.count()), a.pipe(rx.count(isC), rx.map((n) => `c${n}`))),
+  });
+  prop1('toArray', { ours: ({ a }) => a.pipe(fp.toArray()), theirs: ({ a }) => a.pipe(rx.toArray()) });
+  prop1('first: plain, with predicate, with default', {
+    ours: ({ a }) =>
+      fp.merge(a.pipe(fp.first(), fp.map((v) => `1${v}`), fp.catchError(() => fp.of('E1'))),
+        a.pipe(fp.first(isC), fp.map((v) => `2${v}`), fp.catchError(() => fp.of('E2'))),
+        a.pipe(fp.first(isC, 'd'), fp.map((v) => `3${v}`))),
+    theirs: ({ a }) =>
+      rx.merge(a.pipe(rx.first(), rx.map((v) => `1${v}`), rx.catchError(() => rx.of('E1'))),
+        a.pipe(rx.first(isC), rx.map((v) => `2${v}`), rx.catchError(() => rx.of('E2'))),
+        a.pipe(rx.first(isC, 'd'), rx.map((v) => `3${v}`))),
+  });
+  prop1('first: the EmptyError itself', { ours: ({ a }) => a.pipe(fp.first(isC)), theirs: ({ a }) => a.pipe(rx.first(isC)) });
+  prop1('last: plain, with predicate, with default', {
+    ours: ({ a }) =>
+      fp.merge(a.pipe(fp.last(), fp.map((v) => `1${v}`), fp.catchError(() => fp.of('E1'))),
+        a.pipe(fp.last(isC), fp.map((v) => `2${v}`), fp.catchError(() => fp.of('E2'))),
+        a.pipe(fp.last(isC, 'd'), fp.map((v) => `3${v}`))),
+    theirs: ({ a }) =>
+      rx.merge(a.pipe(rx.last(), rx.map((v) => `1${v}`), rx.catchError(() => rx.of('E1'))),
+        a.pipe(rx.last(isC), rx.map((v) => `2${v}`), rx.catchError(() => rx.of('E2'))),
+        a.pipe(rx.last(isC, 'd'), rx.map((v) => `3${v}`))),
+  });
+  prop1('last: the EmptyError itself', { ours: ({ a }) => a.pipe(fp.last(isC)), theirs: ({ a }) => a.pipe(rx.last(isC)) });
+  prop1('elementAt / elementAt with default', {
+    ours: ({ a }) => fp.merge(a.pipe(fp.elementAt(2), fp.catchError(() => fp.of('E'))), a.pipe(fp.elementAt(3, 'd'), fp.map((v) => `d${v}`))),
+    theirs: ({ a }) => rx.merge(a.pipe(rx.elementAt(2), rx.catchError(() => rx.of('E'))), a.pipe(rx.elementAt(3, 'd'), rx.map((v) => `d${v}`))),
+  });
+  prop1('elementAt: the ArgumentOutOfRangeError itself', { ours: ({ a }) => a.pipe(fp.elementAt(2)), theirs: ({ a }) => a.pipe(rx.elementAt(2)) });
+  prop1('every / isEmpty / find / findIndex together', {
+    ours: ({ a }) =>
+      fp.merge(a.pipe(fp.every((x) => x !== 'c'), fp.map((v) => `e${v}`)), a.pipe(fp.isEmpty(), fp.map((v) => `i${v}`)),
+        a.pipe(fp.find(isC), fp.map((v) => `f${v}`)), a.pipe(fp.findIndex(isC), fp.map((v) => `x${v}`))),
+    theirs: ({ a }) =>
+      rx.merge(a.pipe(rx.every((x) => x !== 'c'), rx.map((v) => `e${v}`)), a.pipe(rx.isEmpty(), rx.map((v) => `i${v}`)),
+        a.pipe(rx.find(isC), rx.map((v) => `f${v}`)), a.pipe(rx.findIndex(isC), rx.map((v) => `x${v}`))),
+  });
+});
+
+describe('creation vocabulary matches RxJS (identity tests, docs/kernel.md)', () => {
+  it('of / range, including empty and negative counts', () => {
+    fc.assert(
+      fc.property(fc.array(fc.string({ maxLength: 2 }), { maxLength: 6 }), fc.integer({ min: -3, max: 10 }), fc.integer({ min: -2, max: 6 }), (xs, start, n) => {
+        same({}, { ours: () => fp.merge(fp.of(...xs), fp.range(start, n)), theirs: () => rx.merge(rx.of(...xs), rx.range(start, n)) });
+      }),
+      { numRuns: RUNS },
+    );
+  });
+  it('interval', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 1, max: 5 }), fc.integer({ min: 0, max: 6 }), (ms, n) => {
+        same({}, { ours: (_, s) => fp.interval(ms, s).pipe(fp.take(n)), theirs: (_, s) => rx.interval(ms, s).pipe(rx.take(n)) });
+      }),
+      { numRuns: RUNS },
+    );
+  });
+  prop2('iif chooses at subscription time', {
+    ours: ({ a, b }) => {
+      let flip = false;
+      const chosen = fp.iif(() => (flip = !flip), a, b);
+      return fp.concat(chosen, chosen);
+    },
+    theirs: ({ a, b }) => {
+      let flip = false;
+      const chosen = rx.iif(() => (flip = !flip), a, b);
+      return rx.concat(chosen, chosen);
+    },
+  });
+});
