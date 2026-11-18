@@ -68,6 +68,8 @@ import { delay, debounceTime } from 'rxjs-fp/time';
 
 The families are `rxjs-fp/kernel`, `/creation`, `/values`, `/time`, `/concurrency`, `/combination`, `/errors` and `/multicast`.
 
+A small end-to-end sample in this style is in [examples/users](examples/users): a pipeline of named decisions (`users.ts`), a real-time demo with a fake service (`npm run example:users`), and the same code tested in virtual time (`users.test.ts`).
+
 The library source must not contain `class`, `this`, `instanceof`, `.prototype` or `new` on custom types. A test checks this on the TypeScript AST (`test/purity.test.ts`).
 
 ## Install and scripts

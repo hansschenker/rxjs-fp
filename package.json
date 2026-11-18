@@ -83,7 +83,8 @@
     "test:watch": "vitest",
     "check": "npm run typecheck && npm test && npm run build",
     "example:todo": "vite examples/todo/browser",
-    "example:todo:node": "tsx examples/todo/node-demo.ts"
+    "example:todo:node": "tsx examples/todo/node-demo.ts",
+    "example:users": "tsx examples/users/demo.ts"
   },
   "engines": {
     "node": ">=18"

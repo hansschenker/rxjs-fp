@@ -3,8 +3,13 @@
     "target": "ES2020",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2020", "DOM"],
-    "types": ["node"],
+    "lib": [
+      "ES2020",
+      "DOM"
+    ],
+    "types": [
+      "node"
+    ],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitReturns": true,
@@ -17,7 +22,46 @@
     "skipLibCheck": true,
     "declaration": true,
     "sourceMap": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "rxjs-fp": [
+        "./src/index.ts"
+      ],
+      "rxjs-fp/kernel": [
+        "./src/kernel.ts"
+      ],
+      "rxjs-fp/creation": [
+        "./src/vocabulary/creation.ts"
+      ],
+      "rxjs-fp/values": [
+        "./src/vocabulary/values.ts"
+      ],
+      "rxjs-fp/time": [
+        "./src/vocabulary/time.ts"
+      ],
+      "rxjs-fp/concurrency": [
+        "./src/vocabulary/concurrency.ts"
+      ],
+      "rxjs-fp/combination": [
+        "./src/vocabulary/combination.ts"
+      ],
+      "rxjs-fp/errors": [
+        "./src/vocabulary/errors.ts"
+      ],
+      "rxjs-fp/multicast": [
+        "./src/vocabulary/multicast.ts"
+      ],
+      "rxjs-fp/fp": [
+        "./src/fp/index.ts"
+      ],
+      "rxjs-fp/testing": [
+        "./src/testing/index.ts"
+      ]
+    }
   },
-  "include": ["src", "test", "examples"]
+  "include": [
+    "src",
+    "test",
+    "examples"
+  ]
 }
