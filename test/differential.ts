@@ -86,6 +86,10 @@ export const completingMarbleArb = (maxLen = 10, alphabet = 'abcde'): fc.Arbitra
 export const tagWindowsRx = <A>(w$: rx.Observable<rx.Observable<A>>): rx.Observable<string> =>
   w$.pipe(rx.mergeMap((w, i) => w.pipe(rx.map((v) => `${i}:${String(v)}`))));
 
+/** Like `tagWindowsRx`, but also records each window's open and close, so same-frame order is compared too. */
+export const tagWindowsStrictRx = <A>(w$: rx.Observable<rx.Observable<A>>): rx.Observable<string> =>
+  w$.pipe(rx.mergeMap((w, i) => rx.concat(rx.of(`${i}:open`), w.pipe(rx.map((v) => `${i}:${String(v)}`)), rx.of(`${i}:close`))));
+
 export const RUNS = Number(process.env['LAW_RUNS'] ?? 200);
 
 /** Like `marbleArb`, but at least one value comes before the end. */

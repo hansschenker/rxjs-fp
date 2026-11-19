@@ -566,16 +566,29 @@ a user-facing feature and become internal machinery.
 `src/operators/window.ts` holds both families, and its header states the relationship exactly:
 buffering and windowing cut the source the same way and differ only in delivery — **a buffer is an
 array emitted when the chunk closes; a window is an Observable emitted when the chunk opens**, which
-then streams the chunk's values live. So `buffer`/`bufferTime`/`bufferToggle`/`bufferWhen` and
-`window`/`windowCount`/`windowTime`/`windowToggle`/`windowWhen` are nine operators in one file —
-four buffers and five windows — with `subscribeInner` (§3.3) carrying every notifier and
-closing-selector.
+then streams the chunk's values live. Only four of them are producers, all in that file — `window`, `windowToggle`, `windowWhen` and the
+exception `bufferWhen` — with `subscribeInner` (§3.3) carrying every notifier and closing-selector.
+The rest of the family is vocabulary (`src/vocabulary/time.ts`): each `buffer…` is its window
+counterpart with every window collected into an array, and `windowCount` and the four `windowTime…`
+are compositions, see below.
 
 The asymmetry is the instructive part. `bufferCount` is absent from that file: it lives in
-`src/operators/transform.ts` as a Mealy machine (§5), because a count-based buffer needs no notifier
+`src/vocabulary/values.ts` as a Mealy machine (§5), because a count-based buffer needs no notifier
 and its state really is just a value. `windowCount` cannot make the same move, because emitting a
 window means manufacturing a Subject, and a machine may only return values. The buffer/window
 symmetry breaks exactly where the §17 decision procedure says it must.
+
+`windowCount` goes the other way instead and stops being a producer at all. It is `windowToggle` whose
+openings and closings are counts of the source's own values; `windowTime` is `windowWhen` closed by a
+timer, `windowTimeEvery` is `windowToggle` opened by an interval and closed by per-window timers, and
+the `…OrCount` variants `race` that timer against a count. The one thing a composition cannot get from
+`pipe` alone is *order within a value*: a notifier derived from the source sees each value before the
+windows do, so a count-based closing would fire one value early. `afterDelivery` recovers that order
+from subscription order with two `connect` layers — the windows subscribe to the first, the counts to
+the second, and the second is fed only after the windows have received the value — which is the
+statement order a hand-written producer gets for free. The cost is the one intra-frame difference
+listed in the README: with both an interval and a maximum size, a value reaches every open window
+before the window it fills closes, where RxJS closes it between deliveries.
 
 One detail matters more than it looks: each window is a Subject handed out through
 `asObservable()`. That is what makes the emitted window read-only — a consumer holding it cannot
@@ -614,6 +627,10 @@ rather than against the outer sink, precisely so that its lifetime is the `conne
 the outer subscriber's. A class-based implementation would hold this in two fields on a subscriber
 object; here it is two closure cells and one scope, and the condition that couples them is a single
 named function — which is, if anything, easier to audit than fields mutated from two methods.
+
+---
+
+## 8. Schedulers as injected records
 
 RxJS's scheduling is a class hierarchy: `Scheduler`, `AsyncScheduler`, `AsapScheduler`,
 `AnimationFrameScheduler`, `VirtualTimeScheduler`, each paired with an `Action` subclass
@@ -1141,10 +1158,11 @@ The architecture answers "how do I write this operator?" with a five-way test. I
    `subscribeChild`, and drive the operator off the `Inner` handle it returns — a synchronous
    duration can end before your subscription variable is assigned. (`debounce`, `audit`, `buffer`,
    `windowWhen`.)
-5. **Does it emit Observables?** You need a Subject per chunk or per key, handed out through
-   `asObservable()` so consumers cannot push into it, and you need to decide explicitly what keeps
-   the source alive — see `groupBy`'s `maybeDisconnect` for the two-condition version.
-   (`window*`, `groupBy`.)
+5. **Does it emit Observables?** First try to compose `window`, `windowToggle` or `windowWhen`
+   (`windowCount` and the `windowTime…` operators are such compositions). Otherwise you need a
+   Subject per chunk or per key, handed out through `asObservable()` so consumers cannot push into
+   it, and you need to decide explicitly what keeps the source alive — see `groupBy`'s
+   `maybeDisconnect` for the two-condition version. (`window`, `windowToggle`, `windowWhen`, `groupBy`.)
 
 Then the invariants, each with the place that enforces it:
 

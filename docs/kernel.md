@@ -32,8 +32,8 @@ utilities and the Promise conversions). `src/kernel.ts` lists the kernel exactly
 | Tier | What it is | Count |
 | --- | --- | --- |
 | Primitives | `observable` (the constructor) and `fromMachine` (runs a pure machine) | 2 |
-| Base operators | implemented directly, and either not a composition or the base other operators are built on | 53 |
-| Named cores | several public names over one native implementation, chosen by name instead of a config object | 3 cores, 9 names |
+| Base operators | implemented directly, and either not a composition or the base other operators are built on | 52 |
+| Named cores | several public names over one native implementation, chosen by name instead of a config object | 2 cores, 5 names |
 | Adapters | bridges to platform sources: iterables, Promises, async iterables, callbacks, event APIs, animation frames | 10 |
 
 When is a machine kernel? Every value operator is a `fromMachine` machine. The kernel holds the
@@ -85,7 +85,7 @@ pick the value with `filter` and `take(1)`, then say what an empty stream means 
 `take` and `takeWhile` stay separate: `take(n)` completes with its `n`th value, while
 `takeWhile((_, i) => i < n)` completes only when the next value arrives and fails the test.
 
-### Time-based (11 base operators, 2 named cores)
+### Time-based (10 base operators, 1 named core)
 
 The kernel takes its criterion as an Observable or a function. Each `…Time` operator is the
 vocabulary version with a timer, and each buffer operator but one is its window counterpart with
@@ -99,11 +99,22 @@ every window collected into an array.
 | `sample` | emits the latest value when a notifier fires | `sampleTime` |
 | `timeout`, `timeoutFirst`, `timeoutFirstAndEach` (named core) | errors when a value takes too long | `catchTimeout` (errors family) |
 | `window` | chunks of values as Observables, closed by a notifier | `buffer` |
-| `windowTime`, `…Every`, `…OrCount`, `…EveryOrCount` (named core) | chunks by time, overlapping or capped | the four `bufferTime…` |
-| `windowToggle` | a chunk per opening, closed by its own closing | `bufferToggle` |
-| `windowWhen`, `windowCount` | back-to-back chunks by a closing factory, or by count | |
+| `windowToggle` | a chunk per opening, closed by its own closing | `windowCount`, `windowTimeEvery`, `windowTimeEveryOrCount`, `bufferToggle` |
+| `windowWhen` | back-to-back chunks by a closing factory | `windowTime`, `windowTimeOrCount` |
 | `bufferWhen` | back-to-back arrays by a closing factory | |
 | `observeOn`, `subscribeOn` | move notifications or the subscription onto a scheduler | |
+
+`windowCount` and the four `windowTime…` are compositions of those three shapes: `windowTime` is
+`windowWhen` closed by a timer, `windowTimeEvery` is `windowToggle` opened by an interval, and
+`windowCount` is `windowToggle` whose openings and closings are counts of the source's own values.
+The one thing a composition cannot take from `pipe` is *order within a value*: a notifier derived
+from the source sees each value before the windows do, so a count would fire one value early.
+`afterDelivery` (in `src/vocabulary/time.ts`) recovers the order from subscription order with two
+`connect` layers — the windows subscribe to the first, the counts to the second, and the second is fed
+only after the windows have received the value. `…OrCount` races that count against the timer. The
+one difference this leaves is documented in the README: with both an interval and a maximum size, a
+value reaches every open window before the window it fills closes, where RxJS closes it between
+deliveries.
 
 `bufferWhen` is the exception among the buffers: RxJS 7 opens a new window when the closing
 notifier completes, but ignores that completion for a buffer, so `windowWhen` plus `toArray` would
@@ -181,11 +192,12 @@ They stay in the kernel, as loops.
 
 ### How far from 30
 
-53 base operators, not 30 (8 creation, 14 value, 11 time, 3 concurrency, 5 combination, 6 errors, 6 multicast). Where the next reductions could come from, each still to be confirmed
+52 base operators, not 30 (8 creation, 14 value, 10 time, 3 concurrency, 5 combination, 6 errors, 6 multicast). Where the next reductions could come from, each still to be confirmed
 by an identity test:
 
-- **The window family (6 entries)** is the biggest block. If `windowTime…` and `windowCount` can be
-  written with `windowToggle` and timers, two entries and a named core go.
+- **The window family** — done. `windowCount` and the four `windowTime…` are vocabulary over
+  `windowToggle`, `windowWhen` and timers; one base operator and one named core went. The window
+  kernel is now `window`, `windowToggle`, `windowWhen` and `bufferWhen`.
 - **Trivial sequences.** `EMPTY`, `NEVER` and `throwError` are one idea; counted as one, two go.
 - **Scheduling.** `observeOn` and `subscribeOn` move work onto a scheduler rather than shaping the
   stream; they could live with the schedulers instead.
@@ -230,7 +242,7 @@ Rules that keep the layering intact:
 | --- | --- | --- |
 | `rxjs-fp/kernel` | `src/kernel.ts` | done: re-exports the kernel plus the types and helpers vocabulary needs |
 | `rxjs-fp/concurrency` | `src/vocabulary/concurrency.ts` | done: `mergeMap`, `concatMap`, `switchMap`, `exhaustMap`, the four `…All`, `merge`, `concat`, `mergeWith`, `concatWith` |
-| `rxjs-fp/time` | `src/vocabulary/time.ts` | done: `delay`, `emitAfter`, `debounceTime`, `throttleTime` and its variants, `throttleTimeWith`, `auditTime`, `sampleTime` |
+| `rxjs-fp/time` | `src/vocabulary/time.ts` | done: `delay`, `emitAfter`, `debounceTime`, `throttleTime` and its variants, `throttleTimeWith`, `auditTime`, `sampleTime`, `windowCount`, `windowTime`, `windowTimeEvery`, `windowTimeOrCount`, `windowTimeEveryOrCount` |
 | `rxjs-fp/values` | `src/vocabulary/values.ts` | done: `as`, `withIndex`, `skip`, `ignoreElements`, `count`, `toArray`, `first`, `last`, `elementAt`, `find`, `findIndex`, `every`, `isEmpty`, `distinctUntilKeyChanged` |
 | `rxjs-fp/creation` | `src/vocabulary/creation.ts` | done: `of`, `range`, `interval`, `iif` |
 | `rxjs-fp/combination` | `src/vocabulary/combination.ts` | done: `takeUntil`, `forkJoin`, `startWith`, `endWith`, `onErrorResumeNext`, `combineLatestWith`, `zipWith`, `raceWith`, `onErrorResumeNextWith`, `combineLatestAll`, `zipAll`, `partition` |
@@ -260,6 +272,12 @@ test:
 A limit of the harness: the rxjs-fp and RxJS test schedulers order a hot and a cold event in the
 same frame differently (even a plain `merge` shows it), and rxjs-fp subscribes just after a hot
 value at frame 0. Identity tests therefore use cold inputs, or hot inputs that avoid those ties.
+
+A second limit: in run mode, RxJS's `TestScheduler` runs same-frame `asyncScheduler` actions in the
+order their timer records were created, not in scheduling order, and throws `Expected a due
+immediate or interval` on some ties. The window comparisons that also record opens and closes therefore
+use parameters without same-frame ties, and `test/window.test.ts` pins rxjs-fp's own order, which
+follows scheduling order.
 
 Results so far:
 

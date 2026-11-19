@@ -130,6 +130,7 @@ Left out on purpose, because RxJS 7 deprecates them and RxJS 8 removes them: `mu
 Known differences:
 - **`combineLatest`** (deliberate) completes as soon as one input completes without having emitted, because no combination can ever be produced. RxJS waits for the other inputs to complete. `combineLatestAll` inherits this.
 - **`windowToggle`**: an error from `openings` also errors the open windows.
+- **`windowTimeEveryOrCount`**: when a value fills one window while others are open, every open window receives the value before the full one closes; RxJS closes the full window before handing the value to the next one. Values, frames and window membership are identical, only that same-frame order differs. (`bufferTimeEveryOrCount` is unaffected: a buffer is only observable when it closes.)
 - **No config objects** (rule 7). Each RxJS config maps to a named operator, and the differential tests check that pair against RxJS:
 
   | RxJS 7 | rxjs-fp |

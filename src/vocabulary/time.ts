@@ -14,18 +14,27 @@
  * The exception is `bufferWhen` (kernel): RxJS 7 opens a new window when the
  * closing notifier completes, but ignores that completion for a buffer.
  *
+ * The windows themselves are vocabulary too, except the three kernel shapes
+ * `window`, `windowToggle` and `windowWhen`: `windowTime` is `windowWhen`
+ * closed by a timer, `windowTimeEvery` is `windowToggle` opened by an
+ * interval, and `windowCount` is `windowToggle` driven by counts of the
+ * source's own values (see `afterDelivery` below).
+ *
  * Built only on the kernel (checked by test/layering.test.ts), and each
  * definition confirmed against RxJS 7 by test/differential.test.ts.
  */
 import {
   asyncScheduler,
   audit,
+  connect,
   debounce,
   defer,
   from,
   Leading,
   LeadingAndTrailing,
   map,
+  race,
+  repeat,
   sample,
   scan,
   take,
@@ -33,19 +42,17 @@ import {
   timer,
   Trailing,
   window,
-  windowTime,
-  windowTimeEvery,
-  windowTimeEveryOrCount,
-  windowTimeOrCount,
   windowToggle,
+  windowWhen,
 } from '../kernel.js';
 import type { Observable, ObservableInput, Operator, Scheduler, ThrottleStrategy } from '../kernel.js';
-import { mergeMap } from './concurrency.js';
-import { toArray } from './values.js';
+import { concat, merge, mergeMap } from './concurrency.js';
+import { of } from './creation.js';
+import { skip, toArray } from './values.js';
 
 // The family's kernel members, so the family is importable from one place
 export { debounce, throttleWith, audit, sample, window, timeout, timeoutFirst, timeoutFirstAndEach, observeOn, subscribeOn } from '../kernel.js';
-export { windowTime, windowTimeEvery, windowTimeOrCount, windowTimeEveryOrCount, windowToggle, windowWhen, bufferWhen } from '../kernel.js';
+export { windowToggle, windowWhen, bufferWhen } from '../kernel.js';
 export { Leading, Trailing, LeadingAndTrailing, timer } from '../kernel.js';
 export type { ThrottleStrategy } from '../kernel.js';
 
@@ -133,6 +140,86 @@ export const timeInterval =
  */
 export const delayWhen = <A>(delayDurationSelector: (value: A, index: number) => ObservableInput<unknown>): Operator<A, A> =>
   mergeMap((a: A, i: number) => from(delayDurationSelector(a, i)).pipe(take(1), map(() => a)));
+
+// --- windows by count and by time --------------------------------------------------
+
+/**
+ * Runs `build` with two multicast views of the source. Subscribers of
+ * `values` receive each value first; `ticks` receives it afterwards, because
+ * the inner `connect` subscribes its feeder to `values` only after `build`'s
+ * result has. An operator subscribed to `values` can therefore take its
+ * notifiers from `ticks` and count only values it has already delivered —
+ * the ordering a hand-written producer gets from statement order. A notifier
+ * subscribed to `ticks` while a tick is being delivered first sees the next
+ * one (Subjects deliver to a snapshot of their observers).
+ */
+const afterDelivery = <A, B>(build: (values: Observable<A>, ticks: Observable<A>) => Observable<B>): Operator<A, B> =>
+  connect<A, B>((values) => values.pipe(connect<A, B>((ticks) => build(values, ticks))));
+
+/** Emits the n-th value (1-based) and completes. */
+const nthValue =
+  <A>(n: number): Operator<A, A> =>
+  (source) =>
+    source.pipe(skip(n - 1), take(1));
+
+/**
+ * Windows of `windowSize` values, a new one starting every
+ * `startWindowEvery` values (default: `windowSize`, back to back).
+ *
+ * `windowToggle` whose openings and closings are counts of the source's own
+ * values: open now and after every `startWindowEvery`-th value, close each
+ * window after its `windowSize`-th. Counted through `afterDelivery`, so a
+ * window never sees the value that opened it and always sees the one that
+ * closes it. The opening count is re-subscribed (`repeat`) after each window
+ * opens, which keeps every closing ahead of the next opening on the same
+ * value: a full window closes before the next one opens, as in RxJS.
+ */
+export const windowCount = <A>(windowSize: number, startWindowEvery = 0): Operator<A, Observable<A>> => {
+  const startEvery = startWindowEvery > 0 ? startWindowEvery : windowSize;
+  return afterDelivery<A, Observable<A>>((values, ticks) =>
+    values.pipe(
+      windowToggle<A, unknown>(concat(of(0), ticks.pipe(nthValue(startEvery), repeat())), () => ticks.pipe(nthValue(windowSize))),
+    ),
+  );
+};
+
+/** Opens a window now and on every `interval` tick: the openings of `windowTimeEvery…`. */
+const everyInterval = (interval: number, scheduler: Scheduler): Observable<unknown> => merge(timer(interval, interval, scheduler), of(0));
+
+/**
+ * Windows of `timeSpan` ms, back to back: a new window opens when the previous
+ * one closes. At a frame where the timer and a value coincide, the timer runs
+ * first (it was scheduled first), so the value lands in the new window.
+ */
+export const windowTime = <A>(timeSpan: number, scheduler: Scheduler = asyncScheduler): Operator<A, Observable<A>> =>
+  windowWhen<A>(() => timer(timeSpan, undefined, scheduler));
+
+/** Opens a `timeSpan`-ms window now and every `interval` ms, so windows overlap or leave gaps. */
+export const windowTimeEvery = <A>(timeSpan: number, interval: number, scheduler: Scheduler = asyncScheduler): Operator<A, Observable<A>> =>
+  windowToggle<A, unknown>(everyInterval(interval, scheduler), () => timer(timeSpan, undefined, scheduler));
+
+/** Like `windowTime`, but closes a window early once it has emitted `maxSize` values. */
+export const windowTimeOrCount = <A>(timeSpan: number, maxSize: number, scheduler: Scheduler = asyncScheduler): Operator<A, Observable<A>> =>
+  afterDelivery<A, Observable<A>>((values, ticks) =>
+    values.pipe(windowWhen<A>(() => race(timer(timeSpan, undefined, scheduler), ticks.pipe(nthValue(maxSize))))),
+  );
+
+/**
+ * `windowTimeEvery` and `windowTimeOrCount` together. One documented
+ * difference from RxJS (README): a value reaches every open window before the
+ * window it fills closes, where RxJS closes that window between deliveries.
+ */
+export const windowTimeEveryOrCount = <A>(
+  timeSpan: number,
+  interval: number,
+  maxSize: number,
+  scheduler: Scheduler = asyncScheduler,
+): Operator<A, Observable<A>> =>
+  afterDelivery<A, Observable<A>>((values, ticks) =>
+    values.pipe(
+      windowToggle<A, unknown>(everyInterval(interval, scheduler), () => race(timer(timeSpan, undefined, scheduler), ticks.pipe(nthValue(maxSize)))),
+    ),
+  );
 
 // --- buffers: windows collected into arrays -------------------------------------
 

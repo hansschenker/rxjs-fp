@@ -59,7 +59,6 @@ export {
   flushError,
   materialize,
   dematerialize,
-  windowCount,
   groupBy,
   groupByUntil,
 } from '../kernel.js';

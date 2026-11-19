@@ -4,7 +4,17 @@ import * as rx from 'rxjs';
 import * as fp from '../src/index.js';
 import type { Observable } from '../src/index.js';
 import { none, some } from '../src/fp/index.js';
-import { completingMarbleArb, emittingMarbleArb, marbleArb, runOurs, runTheirs, RUNS, tagWindowsRx, type Input } from './differential.js';
+import {
+  completingMarbleArb,
+  emittingMarbleArb,
+  marbleArb,
+  runOurs,
+  runTheirs,
+  RUNS,
+  tagWindowsRx,
+  tagWindowsStrictRx,
+  type Input,
+} from './differential.js';
 
 /**
  * Every operator added to close the gap with RxJS 7.8 is checked here
@@ -13,6 +23,12 @@ import { completingMarbleArb, emittingMarbleArb, marbleArb, runOurs, runTheirs, 
 
 const tagWindows = <A>(w$: Observable<Observable<A>>): Observable<string> =>
   w$.pipe(fp.mergeMap((w: Observable<A>, i: number) => w.pipe(fp.map((v) => `${i}:${String(v)}`))));
+
+/** Like `tagWindows`, but also records each window's open and close, so same-frame order is compared too. */
+const tagWindowsStrict = <A>(w$: Observable<Observable<A>>): Observable<string> =>
+  w$.pipe(
+    fp.mergeMap((w: Observable<A>, i: number) => fp.concat(fp.of(`${i}:open`), w.pipe(fp.map((v) => `${i}:${String(v)}`)), fp.of(`${i}:close`))),
+  );
 
 type Both<K extends string> = {
   readonly ours: (i: Record<K, Observable<string>>, s: fp.Scheduler) => Observable<unknown>;
@@ -706,4 +722,38 @@ describe('former outliers match RxJS (identity tests, docs/kernel.md)', () => {
       expect(ours).toEqual({ out: ['a', 'b'], during: 1, after: 0 });
     }
   });
+});
+
+describe('window vocabulary matches RxJS including same-frame order', () => {
+  for (const [size, every] of [
+    [3, 0],
+    [1, 0],
+    [2, 1],
+    [3, 2],
+    [2, 3],
+  ] as const) {
+    prop1(`windowCount(${size}, ${every})`, {
+      ours: ({ a }) => tagWindowsStrict(a.pipe(fp.windowCount(size, every))),
+      theirs: ({ a }) => tagWindowsStrictRx(a.pipe(rx.windowCount(size, every))),
+    });
+  }
+  prop1('windowTime(3)', {
+    ours: ({ a }, s) => tagWindowsStrict(a.pipe(fp.windowTime(3, s))),
+    theirs: ({ a }) => tagWindowsStrictRx(a.pipe(rx.windowTime(3))),
+  });
+  prop1('windowTimeOrCount(3, 2)', {
+    ours: ({ a }, s) => tagWindowsStrict(a.pipe(fp.windowTimeOrCount(3, 2, s))),
+    theirs: ({ a }) => tagWindowsStrictRx(a.pipe(rx.windowTime(3, null, 2))),
+  });
+  // Interval windows are compared strictly only where no same-frame ties can occur: in run mode,
+  // RxJS's TestScheduler runs same-frame asyncScheduler actions in insertion order rather than scheduling
+  // order, and throws "Expected a due immediate or interval" on some ties. test/window.test.ts pins ours.
+  prop1(
+    'windowTimeEvery(2, 4)',
+    {
+      ours: ({ a }, s) => tagWindowsStrict(a.pipe(fp.windowTimeEvery(2, 4, s))),
+      theirs: ({ a }) => tagWindowsStrictRx(a.pipe(rx.windowTime(2, 4))),
+    },
+    completingMarbleArb(),
+  );
 });

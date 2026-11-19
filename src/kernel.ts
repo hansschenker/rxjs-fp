@@ -41,8 +41,7 @@ export { throwIfEmpty, sequenceEqual } from './operators/conditional.js';
 export { debounce, throttleWith, audit, sample, timeout, timeoutFirst, timeoutFirstAndEach, observeOn, subscribeOn } from './operators/time.js';
 export { Leading, Trailing, LeadingAndTrailing } from './operators/time.js';
 export type { ThrottleStrategy } from './operators/time.js';
-export { window, windowCount, windowToggle, windowWhen, bufferWhen } from './operators/window.js';
-export { windowTime, windowTimeEvery, windowTimeOrCount, windowTimeEveryOrCount } from './operators/window.js';
+export { window, windowToggle, windowWhen, bufferWhen } from './operators/window.js';
 export { groupBy, groupByUntil } from './operators/group.js';
 export type { GroupedObservable } from './operators/group.js';
 
