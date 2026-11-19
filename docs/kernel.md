@@ -27,14 +27,17 @@ identity test (below) is correct by construction.
 
 Every operator in rxjs-fp is now either kernel or vocabulary; nothing is left outside the family
 modules except infrastructure (schedulers, error constructors, notification helpers, subscription
-utilities and the Promise conversions). `src/kernel.ts` lists the kernel exactly. It has four tiers:
+utilities and the Promise conversions). `src/kernel.ts` lists the implementation boundary and the
+helpers needed by vocabulary. Some exported names are specializations of a canonical interpreter.
+The algebraic policy API is described in [algebraic-policies.md](algebraic-policies.md).
 
-| Tier | What it is | Count |
-| --- | --- | --- |
-| Primitives | `observable` (the constructor) and `fromMachine` (runs a pure machine) | 2 |
-| Base operators | implemented directly, and either not a composition or the base other operators are built on | 52 |
-| Named cores | several public names over one native implementation, chosen by name instead of a config object | 2 cores, 5 names |
-| Adapters | bridges to platform sources: iterables, Promises, async iterables, callbacks, event APIs, animation frames | 10 |
+| Part | What it is |
+| --- | --- |
+| Primitives | `observable` (the constructor) and `fromMachine` (runs a pure machine) |
+| Base operators | Direct implementations, or the base that other operators are built on |
+| Policy interpreters | `repeat`, `retry`, `share`, `throttle`, and `timeout`, with named sums and readonly products |
+| Specializations | `shareReplay`, `retryWith`, `timeoutFirst` and other public names that select the canonical policies |
+| Adapters | Bridges to platform sources: iterables, Promises, async iterables, callbacks, event APIs, animation frames |
 
 When is a machine kernel? Every value operator is a `fromMachine` machine. The kernel holds the
 machines other operators are built on (`take`, `filter`, `reduce`, …). A machine that nothing builds
@@ -42,7 +45,7 @@ on (`pairwise`, `skipLast`, `single`, `max`, `min`, `bufferCount`) is vocabulary
 and pure `step`/`flush` functions handed to the primitive `fromMachine`, with no shell code of its
 own.
 
-### Creation (8 base operators, 10 adapters)
+### Creation
 
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
@@ -58,7 +61,7 @@ Adapters: `fromIterable`, `fromArrayLike`, `fromPromise`, `fromAsyncIterable`, `
 `fromEventPattern`, `bindCallback`, `bindNodeCallback`, `animationFrames`, `scheduled`.
 `fromEvent` is vocabulary: `fromEventPattern` with add and remove listener calls on the target.
 
-### Value-based (14 base operators, 1 named core)
+### Value-based
 
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
@@ -85,7 +88,7 @@ pick the value with `filter` and `take(1)`, then say what an empty stream means 
 `take` and `takeWhile` stay separate: `take(n)` completes with its `n`th value, while
 `takeWhile((_, i) => i < n)` completes only when the next value arrives and fails the test.
 
-### Time-based (10 base operators, 1 named core)
+### Time-based
 
 The kernel takes its criterion as an Observable or a function. Each `…Time` operator is the
 vocabulary version with a timer, and each buffer operator but one is its window counterpart with
@@ -94,10 +97,10 @@ every window collected into an array.
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
 | `debounce` | emits a value after a quiet period | `debounceTime` |
-| `throttleWith(strategy)` | lets one value through per window | `throttle`, `throttleTime` and their `Trailing` / `LeadingAndTrailing` variants |
+| `throttle(selector, mode)` | selects leading, trailing, both or suppressed emissions per signal window | `throttleWith`, `throttleTime` and their named variants |
 | `audit` | emits the latest value at the end of each window | `auditTime` |
 | `sample` | emits the latest value when a notifier fires | `sampleTime` |
-| `timeout`, `timeoutFirst`, `timeoutFirstAndEach` (named core) | errors when a value takes too long | `catchTimeout` (errors family) |
+| `timeout(policy, scheduler)` | interprets first/gap deadlines and error/fallback outcomes | `timeoutFirst`, `timeoutFirstAndEach`; `catchTimeout` handles a timeout error |
 | `window` | chunks of values as Observables, closed by a notifier | `buffer` |
 | `windowToggle` | a chunk per opening, closed by its own closing | `windowCount`, `windowTimeEvery`, `windowTimeEveryOrCount`, `bufferToggle` |
 | `windowWhen` | back-to-back chunks by a closing factory | `windowTime`, `windowTimeOrCount` |
@@ -124,7 +127,7 @@ opens a window on an empty source, so that version would emit `[]` where RxJS em
 Also vocabulary here: `delay`, `emitAfter`, `delayWhen` (`mergeMap` over a duration), `timestamp`
 (`map` with `scheduler.now()`), `timeInterval` (`timestamp` then `scan`).
 
-### Concurrency (3)
+### Concurrency
 
 Concurrency is what happens when a value starts nested work while earlier work is still running.
 `flatMapWith(strategy)` takes one of four strategies:
@@ -148,7 +151,7 @@ The same four strategies run through the time family. Applied to `timer(ms)`:
 | delay: every value waits in parallel | `Merge` |
 | spacing values out by `ms` | `Concat` |
 
-### Combination (5)
+### Combination
 
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
@@ -164,23 +167,24 @@ Vocabulary on top, together with the concurrency vocabulary: `takeUntil`, `skipU
 `combineLatest` keeps one deliberate difference from RxJS 7: it completes as soon as an input
 completes without a value, since it can never emit after that (RxJS waits for all inputs).
 
-### Errors and effects (6)
+### Errors and effects
 
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
 | `catchError` | replaces an error with another Observable | `catchTimeout`, `onErrorReturn`, `onErrorResumeNext` |
-| `retryWith(policy)` | resubscribes on error, as the policy decides: `retryNow`, `retryAfter(ms)`, `giveUp` | `retry`, with the policies `times`, `timesWithDelay`, `exponentialBackoff` |
-| `retryConsecutiveWith(policy)` | like `retryWith`, counting only errors since the last value | |
-| `repeat` | resubscribes on completion | |
+| `retry(policy, scheduler)` | restarts after errors according to additional-retry limit, wait and counter choices | `retryWith`, `retryConsecutiveWith`; decision functions `times`, `timesWithDelay`, `exponentialBackoff` |
+| `repeat(policy, scheduler)` | restarts after completion according to total-run limit and wait choice | |
 | `finalize` | runs a function on teardown | |
 | `tap` | runs a side effect per notification | |
 
 The resubscribing operators could be written as recursion: a `catchError` whose handler returns
 the retried source. Values and timing would match RxJS, but each retry would add a subscription
 layer that lives until the stream ends, so a reconnect loop running for days would keep growing.
-They stay in the kernel, as loops.
+The canonical `repeat` and `retry` interpreters stay in the kernel and replace the active source
+subscription rather than nesting a new operator layer. Immediate synchronous restarts still use
+the JavaScript call stack; a scheduled wait can break that recursion.
 
-### Multicasting (6)
+### Multicasting
 
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
@@ -188,12 +192,13 @@ They stay in the kernel, as loops.
 | `connectable`, `connectableOnce` | connect on `connect()`: the theater view; `Once` cannot reconnect | `publish`, `publishReplay`, `publishBehavior`, `publishLast` |
 | `refCount` | connects a connectable while it has subscribers | |
 | `connect(selector)` | multicasts within one subscription | |
-| `shareWith(connector, lifecycle)` | connects automatically | `share`, `shareReplay`, `shareLatest` |
+| `share(policy)` | connects automatically, with independent reset decisions for error, completion and no subscribers | `shareReplay`, `shareWith`, `shareLatest` |
 
 ### How far from 30
 
-52 base operators, not 30 (8 creation, 14 value, 10 time, 3 concurrency, 5 combination, 6 errors, 6 multicast). Where the next reductions could come from, each still to be confirmed
-by an identity test:
+The original 0.1 census counted 52 base operators. The 0.2 policy work consolidates retry and
+sharing behavior behind canonical interpreters, so that historical count should not be treated as
+a current export count. A smaller kernel is still a goal. Further reductions each need an identity test:
 
 - **The window family** — done. `windowCount` and the four `windowTime…` are vocabulary over
   `windowToggle`, `windowWhen` and timers; one base operator and one named core went. The window
@@ -206,8 +211,9 @@ by an identity test:
 - **Notifications.** `materialize` and `dematerialize` could count as one primitive pair beside
   `fromMachine`.
 
-If all of these work out, the kernel drops by about ten, to a little over 40. Getting to 30 needs the postponed step below:
-time and coordination as pure machines, where one interpreter replaces most of the native time code.
+A larger reduction needs the postponed step below: time and coordination as pure machines,
+where one interpreter replaces most of the native time code. Merely renaming public exports
+does not reduce the number of execution rules.
 
 ## The vocabulary modules
 
@@ -285,7 +291,7 @@ Results so far:
 | --- | --- | --- |
 | `debounceTime(ms)` | `debounce(() => timer(ms))` | identical |
 | `debounceTime(ms)` | `switchMap(emitAfter(ms))` | differs: does not flush the pending value on completion, so `debounce` is the better base |
-| `throttleTime(ms)` and its variants | `throttleWith(strategy)(() => timer(ms))` | identical |
+| `throttleTime(ms, mode)` and its variants | `throttle(() => timer(ms), mode)` | identical on the tested diagrams, for all four modes |
 | `auditTime(ms)` | `audit(() => timer(ms))` | identical |
 | `sampleTime(ms)` | `sample(interval(ms))` | identical. RxJS defines `sampleTime` this way; rxjs-fp's former native version emitted the previous value when a tick and a value fell in the same frame, and the composition fixed that |
 | `delay(ms)` | `mergeMap(emitAfter(ms))` | identical on the tested diagrams |
@@ -298,9 +304,10 @@ Results so far:
 | `of`, `range`, `interval`, `iif` | `from`, `unfold`, `timer(ms, ms)`, `defer` | identical, including empty and negative `range` counts |
 | `takeUntil(n)` | `merge` of the notifier's first value and the source's end, both as "stop", into the source's values; `takeWhile` until "stop" | identical, including a notifier that fires at subscription (the source is never subscribed). Without the source's end as "stop" it waited for the notifier |
 | `forkJoin`, `startWith`, `endWith`, `onErrorResumeNext`, `…With`, `…All`, `partition` | `combineLatest` of `takeLast(1)`, `concat`, `catchError(() => EMPTY)`, `toArray` then `mergeMap` | identical |
-| `retry(n)`, `exponentialBackoff`, `catchTimeout`, `onErrorReturn` | `retryWith` with a policy, `catchError` | identical |
-| `retryWith`, `repeat` | recursion through `catchError` or `concat` | identical output, but grows by one subscription layer per resubscription: stays in the kernel |
-| `share…`, `publish…` | `shareWith` or `connectableOnce` with a Subject | identical in the scripted multi-subscriber scenarios |
+| `retryWith`, `retryConsecutiveWith` | `retry` with an algebraic policy and a decision-to-signal function | identical on the tested diagrams |
+| `catchTimeout`, `onErrorReturn` | `catchError` with a selected handler | identical on the tested diagrams |
+| `retry`, `repeat` | recursion through `catchError` or `concat` | identical output, but grows by one subscription layer per resubscription: canonical interpreters stay in the kernel |
+| `shareReplay`, `shareWith`, `shareLatest`, `publish…` | `share` with a policy, or `connectableOnce` with a Subject | identical in the scripted multi-subscriber scenarios |
 | `buffer`, `bufferTime…` ×4, `bufferToggle` | the window counterpart, then `mergeMap(toArray())` | identical, including closings that complete empty, never close, or error |
 | `bufferWhen` | `windowWhen`, then `mergeMap(toArray())` | differs when the closing notifier completes without emitting: RxJS reopens a window but not a buffer. Stays in the kernel |
 | `bufferCount` | `windowCount`, then `mergeMap(toArray())` | differs on an empty source (`[]` instead of nothing). Stays a machine |
@@ -335,8 +342,11 @@ from(userIds).pipe(loadUsersInOrder, shiftBy(500));
   work, and the pipeline goes on:
 
   ```ts
+  const requestRetries: RetryPolicy = {
+    limit: additionalRetries(2), delay: after(1000), counter: keepCount(),
+  };
   const fetchUserReliably = (id: number) =>
-    fetchUser(id).pipe(retryWith(timesWithDelay(2, 1000)), attempt());   // errors become Either values
+    fetchUser(id).pipe(retry(requestRetries, scheduler), attempt());   // errors become Either values
   ```
 
   Handled at the end of the pipeline instead, the first error ends the whole stream.

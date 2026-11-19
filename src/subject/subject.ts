@@ -1,9 +1,12 @@
 import { observable, subscribeChild, subscribeWithin } from '../core/observable.js';
 import { createSubscription } from '../core/subscription.js';
 import { objectUnsubscribedError } from '../core/errors.js';
+import { reportUnhandledError } from '../core/report.js';
 import type { Observable, Observer, Operator, Sink, Subscription } from '../core/types.js';
 import { asyncScheduler, type Scheduler } from '../scheduler/scheduler.js';
 import { from, type ObservableInput } from '../creation/creation.js';
+import { assertNever, unlimited } from '../policies/core.js';
+import type { Limit, PositiveInt, PositiveMilliseconds, Signal } from '../policies/core.js';
 
 /**
  * A Subject is shared state by definition: one producer, many observers.
@@ -29,8 +32,8 @@ interface SubjectCore<A> {
 }
 
 /**
- * @internal Builds a subject; `onSubscribe` lets variants (Behavior, Replay)
- * prime a new observer before it is registered.
+ * @internal Builds a subject; active observers are registered before variants
+ * replay values, so a reentrant next during replay also reaches the newcomer.
  */
 const makeSubject = <A>(hooks: {
   readonly onNext?: (a: A) => void;
@@ -46,16 +49,16 @@ const makeSubject = <A>(hooks: {
 
   const obs = observable<A>((sink) => {
     check();
+    if (!terminal) observers.add(sink);
+    sink.add(() => {
+      observers.delete(sink);
+    });
     hooks.onSubscribe?.(sink);
     if (terminal) {
       if (terminal.kind === 'E') sink.error(terminal.error);
       else sink.complete();
       return;
     }
-    observers.add(sink);
-    return () => {
-      observers.delete(sink);
-    };
   });
 
   const next = (a: A): void => {
@@ -236,63 +239,217 @@ export type ShareLifecycle = { readonly _tag: 'WhileSubscribed' } | { readonly _
 export const WhileSubscribed: ShareLifecycle = Object.freeze({ _tag: 'WhileSubscribed' });
 export const Cached: ShareLifecycle = Object.freeze({ _tag: 'Cached' });
 
-/**
- * Shared by every share operator: turns a cold Observable hot, so all
- * subscribers share one source subscription, connected on the first
- * subscriber. The three flags say when the connection starts over; the
- * lifecycles in `shareWith` are the combinations that are offered.
- */
-const shareCore =
-  <A>(connector: () => Subject<A>, resetOnError: boolean, resetOnComplete: boolean, resetOnRefCountZero: boolean): Operator<A, A> =>
-  (source) => {
+/** A reset signal is triggered by its first next; completion alone keeps state. */
+export type ResetPolicy<Args extends unknown[]> =
+  | Readonly<{ kind: 'keep-state' }>
+  | Readonly<{ kind: 'reset-now' }>
+  | Readonly<{ kind: 'reset-on-next'; signal: (...args: Args) => Signal }>;
 
-    // The connection is the one piece of state shared between subscribers,
-    // which is exactly the point of `share`.
+/** Three independent lifecycle decisions, plus the shared Subject factory. */
+export type SharePolicy<A> = Readonly<{
+  connector: () => Subject<A>;
+  onError: ResetPolicy<[error: unknown]>;
+  onComplete: ResetPolicy<[]>;
+  onNoSubscribers: ResetPolicy<[]>;
+}>;
+
+export const defaultSharePolicy = <A>(): SharePolicy<A> => Object.freeze({
+  connector: createSubject<A>,
+  onError: Object.freeze({ kind: 'reset-now' }),
+  onComplete: Object.freeze({ kind: 'reset-now' }),
+  onNoSubscribers: Object.freeze({ kind: 'reset-now' }),
+});
+
+/** Shared-connection callbacks have no downstream error channel of their own. */
+const reportCallbackError = (effect: () => void): void => {
+  try {
+    effect();
+  } catch (error) {
+    reportUnhandledError(error);
+  }
+};
+
+const startReset = <Args extends unknown[]>(
+  reset: () => void,
+  policy: ResetPolicy<Args>,
+  ...args: Args
+): Subscription | null => {
+  switch (policy.kind) {
+    case 'keep-state':
+      return null;
+    case 'reset-now':
+      reset();
+      return null;
+    case 'reset-on-next': {
+      const makeSignal = policy.signal;
+      // Create the scope before connecting: a synchronous first next must
+      // close the actual notifier, including an iterable's remaining values.
+      const scope = createSubscription();
+      subscribeWithin(from(makeSignal(...args)), scope, {
+        next: () => reportCallbackError(() => {
+          scope.unsubscribe();
+          reset();
+        }),
+        error: (error) => {
+          reportUnhandledError(error);
+          scope.unsubscribe();
+        },
+        complete: scope.unsubscribe,
+      });
+      return scope;
+    }
+    default:
+      return assertNever(policy);
+  }
+};
+
+/**
+ * Share one source connection and interpret independent reset policies.
+ * Reset after a terminal event enables future subscriptions; current observers
+ * still receive that terminal event. A zero-observer reset also disconnects the
+ * active source. A returning observer cancels a pending reset of that kind.
+ * Reset notifier errors are reported as unhandled, as in RxJS 7.8.2.
+ */
+export const share = <A>(policy: SharePolicy<A> = defaultSharePolicy<A>()): Operator<A, A> => {
+  const connector = policy.connector;
+  const onError = { ...policy.onError };
+  const onComplete = { ...policy.onComplete };
+  const onNoSubscribers = { ...policy.onNoSubscribers };
+
+  return (source) => {
+    // This state belongs to the shared observable, deliberately spanning its
+    // observers. Applying the operator to another source gets independent state.
     let subject: Subject<A> | null = null;
     let connection: Subscription | null = null;
+    let resetConnection: Subscription | null = null;
     let refCount = 0;
-    let terminated = false;
+    let hasErrored = false;
+    let hasCompleted = false;
 
+    const cancelReset = (): void => {
+      resetConnection?.unsubscribe();
+      resetConnection = null;
+    };
     const reset = (): void => {
-      const c = connection;
-      connection = null;
-      subject = null;
-      terminated = false;
-      c?.unsubscribe();
+      cancelReset();
+      connection = subject = null;
+      hasErrored = hasCompleted = false;
+    };
+    const resetAndDisconnect = (): void => {
+      const active = connection;
+      reset();
+      active?.unsubscribe();
     };
 
     return observable<A>((sink) => {
       refCount++;
-      // Registered first, so it also runs when a synchronous source makes
-      // the downstream close while we are still connecting.
+      if (!hasErrored && !hasCompleted) cancelReset();
+
+      const destination = (subject ??= connector());
+      // Register before replay or source connection so synchronous take(1)
+      // also closes the upstream connection without leaking a reference.
       sink.add(() => {
         refCount--;
-        if (refCount === 0 && resetOnRefCountZero && !terminated) reset();
+        if (refCount === 0 && !hasErrored && !hasCompleted) {
+          resetConnection = startReset(resetAndDisconnect, onNoSubscribers);
+        }
       });
-      const s = (subject ??= connector());
-      subscribeChild(s, sink);
-      if (connection === null && !terminated && !sink.closed) {
-        // The connection exists *before* the source runs: re-entrant
-        // subscribers see it (no second connection), and closing it stops
-        // even a synchronous source.
-        const conn = createSubscription();
-        connection = conn;
-        subscribeWithin(source, conn, {
-          next: (a) => s.next(a),
-          error: (e) => {
-            terminated = true;
-            if (resetOnError) reset();
-            s.error(e);
+      subscribeChild(destination, sink);
+
+      if (connection === null && refCount > 0) {
+        const active = createSubscription();
+        connection = active;
+        subscribeWithin(source, active, {
+          next: (value) => reportCallbackError(() => destination.next(value)),
+          error: (error) => {
+            try {
+              reportCallbackError(() => {
+                hasErrored = true;
+                cancelReset();
+                resetConnection = startReset(reset, onError, error);
+                destination.error(error);
+              });
+            } finally {
+              active.unsubscribe();
+            }
           },
           complete: () => {
-            terminated = true;
-            if (resetOnComplete) reset();
-            s.complete();
+            try {
+              reportCallbackError(() => {
+                hasCompleted = true;
+                cancelReset();
+                resetConnection = startReset(reset, onComplete);
+                destination.complete();
+              });
+            } finally {
+              active.unsubscribe();
+            }
           },
         });
       }
     });
   };
+};
+
+export type ReplayBounds = Readonly<{
+  maxValues: Limit<PositiveInt>;
+  maxAge: Limit<PositiveMilliseconds>;
+}>;
+
+export type IdlePolicy = 'keep-connected' | 'disconnect-and-reset';
+
+/** Replay count and age bounds apply together; idle behavior is independent. */
+export type ShareReplayPolicy = Readonly<{
+  replay: ReplayBounds;
+  onNoSubscribers: IdlePolicy;
+}>;
+
+export const defaultShareReplayPolicy = (): ShareReplayPolicy => Object.freeze({
+  replay: Object.freeze({ maxValues: unlimited<PositiveInt>(), maxAge: unlimited<PositiveMilliseconds>() }),
+  onNoSubscribers: 'keep-connected',
+});
+
+const replayBound = <N extends number>(limit: Limit<N>): number => {
+  switch (limit.kind) {
+    case 'unlimited':
+      return Number.POSITIVE_INFINITY;
+    case 'limited':
+      // ReplaySubject in RxJS 7.8.2 normalizes each bound to at least one.
+      return Math.max(1, limit.value);
+    default:
+      return assertNever(limit);
+  }
+};
+
+const idleReset = (policy: IdlePolicy): ResetPolicy<[]> => {
+  switch (policy) {
+    case 'keep-connected':
+      return { kind: 'keep-state' };
+    case 'disconnect-and-reset':
+      return { kind: 'reset-now' };
+    default:
+      return assertNever(policy);
+  }
+};
+
+/**
+ * Share with replay and retain successful completion, even when idle behavior
+ * is disconnect-and-reset. Expired values do not cause a completed source to
+ * reconnect. The explicit scheduler supplies the age clock; replay is immediate.
+ */
+export const shareReplay = <A>(
+  policy: ShareReplayPolicy = defaultShareReplayPolicy(),
+  scheduler: Scheduler = asyncScheduler,
+): Operator<A, A> => {
+  const count = replayBound(policy.replay.maxValues);
+  const age = replayBound(policy.replay.maxAge);
+  return share<A>({
+    connector: () => createReplaySubject<A>(count, age, scheduler),
+    onError: { kind: 'reset-now' },
+    onComplete: { kind: 'keep-state' },
+    onNoSubscribers: idleReset(policy.onNoSubscribers),
+  });
+};
 
 /**
  * Turns a cold Observable hot: all subscribers share one source
@@ -303,8 +460,13 @@ const shareCore =
  */
 export const shareWith = <A>(connector: () => Subject<A>, lifecycle: ShareLifecycle): Operator<A, A> =>
   lifecycle._tag === 'WhileSubscribed'
-    ? shareCore<A>(connector, true, true, true)
-    : shareCore<A>(connector, true, false, false);
+    ? share<A>({ ...defaultSharePolicy<A>(), connector })
+    : share<A>({
+        connector,
+        onError: { kind: 'reset-now' },
+        onComplete: { kind: 'keep-state' },
+        onNoSubscribers: { kind: 'keep-state' },
+      });
 
 // ---------------------------------------------------------------------------
 // connectable / connect: multicasting with an explicit connection

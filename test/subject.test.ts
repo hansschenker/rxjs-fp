@@ -5,12 +5,15 @@ import {
   createReplaySubject,
   createSubject,
   isObjectUnsubscribedError,
+  limited,
   map,
   observable,
   of,
+  positiveInteger,
   share,
   shareReplay,
   take,
+  unlimited,
 } from '../src/index.js';
 import { runMarbles } from '../src/testing/index.js';
 import { collect } from './helpers.js';
@@ -117,7 +120,10 @@ describe('share / shareReplay (cold → hot, explicitly)', () => {
       sink.next(10);
       sink.next(20);
       sink.complete();
-    }).pipe(shareReplay(1));
+    }).pipe(shareReplay({
+      replay: { maxValues: limited(positiveInteger(1)), maxAge: unlimited() },
+      onNoSubscribers: 'keep-connected',
+    }));
     expect(collect(src)).toEqual([10, 20, '|']);
     expect(collect(src)).toEqual([20, '|']);
     expect(runs).toBe(1);

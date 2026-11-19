@@ -8,12 +8,12 @@
  * service and the scheduler are arguments, so the same code runs in the app
  * and in a test with a fake service and virtual time.
  */
-import type { Observable, Scheduler } from 'rxjs-fp';
+import { after, type Observable, type Scheduler } from 'rxjs-fp';
 import { from } from 'rxjs-fp/creation';
 import { concatMap } from 'rxjs-fp/concurrency';
 import { delay } from 'rxjs-fp/time';
 import { map } from 'rxjs-fp/values';
-import { retryWith, timesWithDelay } from 'rxjs-fp/errors';
+import { retry, additionalRetries, keepCount, type RetryPolicy } from 'rxjs-fp/errors';
 import { attempt, isRight, type Either } from 'rxjs-fp/fp';
 
 export interface User {
@@ -26,11 +26,18 @@ export type GetUser = (id: number) => Observable<User>;
 
 // --- named decisions -----------------------------------------------------------
 
+/** Two additional connections, each after a 100 ms timer signal. */
+export const userRetryPolicy: RetryPolicy = Object.freeze({
+  limit: additionalRetries(2),
+  delay: after(100),
+  counter: keepCount(),
+});
+
 /** One user: two retries 100 ms apart, then the error becomes a value instead of ending the stream. */
 export const fetchUserReliably =
   (getUser: GetUser, scheduler: Scheduler) =>
   (id: number): Observable<Either<unknown, User>> =>
-    getUser(id).pipe(retryWith(timesWithDelay(2, 100), scheduler), attempt());
+    getUser(id).pipe(retry(userRetryPolicy, scheduler), attempt());
 
 /** All users, one after another, in the order of their ids. */
 export const loadUsersInOrder = (getUser: GetUser, scheduler: Scheduler) => concatMap(fetchUserReliably(getUser, scheduler));

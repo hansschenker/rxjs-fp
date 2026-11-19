@@ -99,7 +99,7 @@ describe('time operators', () => {
   it('throttleTime leaves no timer after downstream closes', () => {
     const vs = createVirtualScheduler();
     const s = createSubject<number>();
-    s.pipe(throttleTime(10, vs), take(1)).subscribe();
+    s.pipe(throttleTime(10, 'leading-only', vs), take(1)).subscribe();
     s.next(1);
     expect(vs.pending()).toBe(0);
   });

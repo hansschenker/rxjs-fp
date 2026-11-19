@@ -14,7 +14,10 @@ const results$ = fromEvent(input, 'input').pipe(
 );
 ```
 
-The API looks like RxJS 7, but the architecture underneath is different.
+The operators follow RxJS 7.8.2 behavior, with an explicitly functional API and runtime.
+Version 0.2 introduces breaking policy signatures for `repeat`, `retry`, `share`,
+`shareReplay`, `throttle` / `throttleTime`, and `timeout`. Their implementations
+interpret algebraic policy values directly. See [the policy and migration guide](docs/algebraic-policies.md).
 
 ## Why
 
@@ -45,16 +48,17 @@ RxJS's implementation has changed shape several times:
 5. **Schedulers are injected, never patched.**
    - A scheduler is `{ now, schedule(work, delay) → cancel }`.
    - Time operators take it as an explicit argument, so tests pass a virtual scheduler and there is no global `TestScheduler.run` patching.
-6. **Errors never escape the pipeline.**
-   - Exceptions from user functions in operators go to `error`.
+6. **Error routes are explicit.**
+   - Exceptions from operator projections go to `error`; invalid policy numbers throw during construction.
+   - Shared reset signals use the unhandled-error route; teardown failures can surface from `unsubscribe()` as `UnsubscriptionError`. The policy guide documents these lifecycle boundaries.
    - Exceptions from consumer callbacks are reported on a fresh stack, never re-entered.
 
-7. **Behaviour is chosen by name, not by a config object.**
-   - A choice between variants is a strategy value, with a named operator for each common case: `throttleWith(Trailing)` is also `throttleTrailing`, as `flatMapWith(Switch)` is `switchMap`.
-   - A different behaviour is a different operator: `timeoutFirst`, `bufferTimeOrCount`, `groupByUntil`.
-   - Behaviour passed in is a function argument: a `groupBy` connector, a fallback in `catchTimeout`, a retry policy.
-   - A decision is a pure function returning data: a retry policy `(error, attempt) => retryNow | retryAfter(ms) | giveUp`.
-   - No function takes a config object, operators and conversions alike.
+7. **Behaviour is an algebra of named choices.**
+   - A sum names alternatives: `immediate | after | on-signal`, or the four `ThrottleMode` values.
+   - A readonly product combines independent decisions: `RepeatPolicy = RepeatLimit × RepeatDelay`.
+   - Each canonical operator interprets its policy directly, with exhaustive branches. There is no conversion back to a native RxJS config.
+   - Functions remain values in that algebra: retry signals receive the error and retry number; timeout fallbacks receive typed diagnostics.
+   - Common names such as `throttleTrailing`, `timeoutFirst`, and `retryWith` compose the same canonical implementations.
 
 The plan for reducing rxjs-fp to a small kernel, with every other operator defined as vocabulary on top of it, is in [docs/kernel.md](docs/kernel.md).
 
@@ -81,6 +85,7 @@ npm test             # vitest (unit, marble, law properties, interop)
 npm run build        # dist/ (ESM + .d.ts)
 npm run example:todo # Todo CRUDL example in the browser (Vite)
 npm run example:todo:node
+npm run example:policies # all six policy families on explicit virtual time
 ```
 
 Entry points: `rxjs-fp` (core and operators), `rxjs-fp/fp` (Option, Either, typeclasses, do-notation), `rxjs-fp/testing` (marbles, virtual time).
@@ -98,9 +103,9 @@ Entry points: `rxjs-fp` (core and operators), `rxjs-fp/fp` (Option, Either, type
 | **Conditional** | `every`, `find`, `findIndex`, `isEmpty`, `sequenceEqual`, `throwIfEmpty`, `defaultIfEmpty` |
 | **Flattening** | `flatMapWith(strategy)`, `mergeMap`, `concatMap`, `switchMap`, `exhaustMap`, `*All`, `expand`, `mergeScan`, `switchScan` |
 | **Combination** | `merge`, `concat`, `combineLatest`, `zip`, `forkJoin` (all tuple-typed), `race`, `onErrorResumeNext`, `withLatestFrom`, `startWith`, `endWith`, `*With` (incl. `raceWith`, `onErrorResumeNextWith`), `combineLatestAll`, `zipAll` |
-| **Time** | `delay`, `emitAfter`, `delayWhen`, `debounceTime`, `debounce`, `throttle` and `throttleTime` (+ `Trailing`, `LeadingAndTrailing`; `throttleWith`, `throttleTimeWith`), `auditTime`, `audit`, `sampleTime`, `sample`, `timeout`, `timeoutFirst`, `timeoutFirstAndEach`, `subscribeOn`, `observeOn` |
-| **Errors** | `catchError`, `catchTimeout`, `retry`, `retryWith` and `retryConsecutiveWith` (with policies `times`, `timesWithDelay`, `exponentialBackoff`), `repeat`, `finalize`, `onErrorReturn`; error values `emptyError`, `timeoutError`, `notFoundError`, `sequenceError`, … with `is*` guards |
-| **Multicasting** | `createSubject`, `createBehaviorSubject`, `createReplaySubject`, `createAsyncSubject`, `share`, `shareReplay`, `shareLatest`, `shareWith(connector, WhileSubscribed | Cached)`, `connectable`, `connectableOnce`, `connect`, `publish`, `publishReplay`, `publishBehavior`, `publishLast`, `refCount` |
+| **Time** | `delay`, `emitAfter`, `delayWhen`, `debounceTime`, `debounce`, `throttle(selector, mode)`, `throttleTime(ms, mode, scheduler)` (+ named variants), `auditTime`, `audit`, `sampleTime`, `sample`, `timeout(policy, scheduler)`, `timeoutFirst`, `timeoutFirstAndEach`, `subscribeOn`, `observeOn` |
+| **Errors** | `catchError`, `catchTimeout`, `retry(policy, scheduler)`, `repeat(policy, scheduler)`, `retryWith` and `retryConsecutiveWith` (decision functions `times`, `timesWithDelay`, `exponentialBackoff`), `finalize`, `onErrorReturn`; error values `emptyError`, `timeoutError`, `notFoundError`, `sequenceError`, … with `is*` guards |
+| **Multicasting** | `createSubject`, `createBehaviorSubject`, `createReplaySubject`, `createAsyncSubject`, `share(policy)`, `shareReplay(policy, scheduler)`, `shareLatest`, `shareWith(connector, WhileSubscribed | Cached)`, `connectable`, `connectableOnce`, `connect`, `publish`, `publishReplay`, `publishBehavior`, `publishLast`, `refCount` |
 | **Conversion** | `firstValueFrom`, `firstValueFromOr`, `lastValueFrom`, `lastValueFromOr`, `toAsyncIterable` |
 | **Schedulers** | `asyncScheduler`, `asapScheduler`, `queueScheduler` (trampoline), `animationFrameScheduler`, `createVirtualScheduler` |
 
@@ -131,33 +136,22 @@ Known differences:
 - **`combineLatest`** (deliberate) completes as soon as one input completes without having emitted, because no combination can ever be produced. RxJS waits for the other inputs to complete. `combineLatestAll` inherits this.
 - **`windowToggle`**: an error from `openings` also errors the open windows.
 - **`windowTimeEveryOrCount`**: when a value fills one window while others are open, every open window receives the value before the full one closes; RxJS closes the full window before handing the value to the next one. Values, frames and window membership are identical, only that same-frame order differs. (`bufferTimeEveryOrCount` is unaffected: a buffer is only observable when it closes.)
-- **No config objects** (rule 7). Each RxJS config maps to a named operator, and the differential tests check that pair against RxJS:
+- **Algebraic policy APIs** (rule 7). The six policy families intentionally replace the RxJS config and numeric overloads. Schedulers stay explicit final arguments. The [migration guide](docs/algebraic-policies.md) gives complete examples.
 
-  | RxJS 7 | rxjs-fp |
+  | RxJS 7.8.2 choice | rxjs-fp 0.2 choice |
   |---|---|
-  | `throttle(d, { leading: false, trailing: true })` | `throttleTrailing(d)` |
-  | `throttle(d, { leading: true, trailing: true })` | `throttleLeadingAndTrailing(d)` |
-  | `timeout({ first })` | `timeoutFirst(first)` |
-  | `timeout({ first, each })` | `timeoutFirstAndEach(first, each)` |
-  | `timeout({ each, with })` | `timeout(each)` then `catchTimeout(with)` |
-  | `bufferTime(span, interval)` | `bufferTimeEvery(span, interval)` |
-  | `bufferTime(span, null, max)` | `bufferTimeOrCount(span, max)` |
-  | `groupBy(key, { duration })` | `groupByUntil(key, duration)` |
-  | `groupBy(key, { element })` | `groupBy(key)`, then `map(element)` on each group |
-  | `generate({ initialState, condition, iterate, resultSelector })` | `generate(initial, condition, iterate)`, then `map(resultSelector)` |
-  | `retry({ count, delay })` | `retryWith(timesWithDelay(count, delay))` |
-  | `retry({ count, delay: (e, n) => timer(…) })` | `retryWith((e, n) => …)`, a policy returning `retryAfter(ms)` or `giveUp` |
-  | `retry({ count, resetOnSuccess: true })` | `retryConsecutiveWith(times(count))` |
-  | `share({ connector })` | `shareWith(connector, WhileSubscribed)` |
-  | `share({ connector: () => new ReplaySubject(1) })` | `shareLatest()` |
-  | `shareReplay({ bufferSize, windowTime })` | `shareWith(() => createReplaySubject(bufferSize, windowTime), Cached)` |
-  | `connectable(source, { resetOnDisconnect: false })` | `connectableOnce(source)` |
-  | `firstValueFrom(source, { defaultValue })` | `firstValueFromOr(source, defaultValue)` |
-  | `lastValueFrom(source, { defaultValue })` | `lastValueFromOr(source, defaultValue)` |
+  | `repeat({ count: 3, delay: 100 })` | `repeat({ limit: totalRuns(3), delay: after(100) }, scheduler)` |
+  | `retry({ count: 2, resetOnSuccess: true })` | `retry({ limit: additionalRetries(2), delay: immediate(), counter: resetOnNext() })` |
+  | `share({ resetOnComplete: false })` | `share({ ...defaultSharePolicy(), onComplete: { kind: 'keep-state' } })` |
+  | `shareReplay({ bufferSize: 1, refCount: true })` | `ShareReplayPolicy` with a one-value bound and `'disconnect-and-reset'` |
+  | `throttle(selector, { leading: false, trailing: true })` | `throttle(selector, 'trailing-only')` |
+  | `timeout({ first, each, with: fallback, meta })` | `TimeoutPolicy` with `'first-then-each'`, `'switch-to'`, and typed `meta` |
 
-  Edge case: RxJS's `shareReplay({ refCount: true })` keeps its replay buffer after the source completes but disconnects when nobody listens. That combination has no lifecycle value; `shareLatest()` covers it for sources that never complete, such as state streams.
+  With `'disconnect-and-reset'`, `shareReplay` disconnects an active source when the final subscriber leaves, while retaining the cache after successful completion. Its default `'keep-connected'` mode retains an active connection during idle periods. Named compositions for other operator families (`bufferTimeEvery`, `groupByUntil`, `connectableOnce`, `firstValueFromOr`, and others) remain available.
 
-- Time operators take the scheduler as their last argument, never inside a config.
+- **Validated policy numbers.** Count and duration constructors reject invalid numbers. Unlimited bounds use a named alternative, not `Infinity`. A repeat count is total runs; a retry count is additional attempts. A timeout gap must be positive; an immediate first deadline uses `deadlineAfter(0)`. Replay bounds retain RxJS's minimum of one value and one millisecond.
+- **Timeout diagnostics.** `TimeoutInfo` includes typed `meta` and preserves the last source value. RxJS 7.8.2 can clear `lastValue` during source teardown before creating its diagnostics; rxjs-fp deliberately retains its existing, more informative contract.
+- **Cancellation safety.** A cancelled output never starts another source producer. This retains the local runtime's safeguard even in the unusual case of cancellation during repeat/retry teardown.
 
 ## Writing an operator
 
@@ -234,6 +228,7 @@ intents ──map(update)──▶ reducer streams ──merge──▶ reducer$
 
 - **Hans Schenker**: author
 - **Claude Opus 5.5** (Anthropic): co-author, pair-programmed the design, implementation and tests
+- **ChatGPT GPT-6 Astra Pro** (OpenAI): contributor, algebraic operator policies, direct interpreters, differential tests and migration documentation
 
 See [CONTRIBUTORS.md](CONTRIBUTORS.md).
 

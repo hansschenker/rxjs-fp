@@ -3,24 +3,23 @@
  *
  * Two views of one idea, a Subject between the source and its subscribers:
  *
- *   automatic connection   shareWith(connector, lifecycle)   → share, shareReplay, shareLatest
+ *   automatic connection   share(policy)                    → shareReplay, shareLatest
  *   explicit connection    connectableOnce(source, connector) → publish, publishReplay, publishBehavior, publishLast
  *
- * Each named operator only chooses the Subject (plain, replay, behaviour,
- * async) and, for `shareWith`, the lifecycle (`WhileSubscribed`, `Cached`).
+ * Each named composition chooses a Subject and lifecycle policy. The canonical
+ * share and shareReplay interpreters live in the kernel.
  *
  * Built only on the kernel (checked by test/layering.test.ts), and each
  * definition confirmed against RxJS 7 by test/differential.test.ts.
  */
 import {
-  Cached,
   connectableOnce,
   createAsyncSubject,
   createBehaviorSubject,
   createReplaySubject,
   createSubject,
-  shareWith,
-  WhileSubscribed,
+  defaultSharePolicy,
+  share,
 } from '../kernel.js';
 import type { Connectable, Observable, Operator } from '../kernel.js';
 
@@ -34,23 +33,30 @@ export {
   connectableOnce,
   connect,
   refCount,
+  share,
+  shareReplay,
+  defaultSharePolicy,
+  defaultShareReplayPolicy,
   shareWith,
   WhileSubscribed,
   Cached,
 } from '../kernel.js';
-export type { Subject, Connectable, ShareLifecycle } from '../kernel.js';
+export type {
+  Subject,
+  Connectable,
+  ShareLifecycle,
+  ResetPolicy,
+  SharePolicy,
+  ReplayBounds,
+  IdlePolicy,
+  ShareReplayPolicy,
+} from '../kernel.js';
 
 // --- automatic connection ---------------------------------------------------
 
-/** One subscription to the source while anyone listens; a later subscriber starts it again. */
-export const share = <A>(): Operator<A, A> => shareWith<A>(createSubject, WhileSubscribed);
-
-/** One subscription to the source, kept with its last `bufferSize` values for late subscribers. */
-export const shareReplay = <A>(bufferSize: number = Number.POSITIVE_INFINITY): Operator<A, A> =>
-  shareWith<A>(() => createReplaySubject<A>(bufferSize), Cached);
-
 /** Like `share`, and a late subscriber gets the latest value at once. For state streams. */
-export const shareLatest = <A>(): Operator<A, A> => shareWith<A>(() => createReplaySubject<A>(1), WhileSubscribed);
+export const shareLatest = <A>(): Operator<A, A> =>
+  share<A>({ ...defaultSharePolicy<A>(), connector: () => createReplaySubject<A>(1) });
 
 // --- explicit connection: the theater --------------------------------------
 

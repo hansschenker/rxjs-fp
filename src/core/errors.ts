@@ -23,20 +23,30 @@ export const emptyError = tagged('EmptyError', 'no elements in sequence');
 export const isEmptyError = is('EmptyError');
 
 /** What a timeout knew when it fired. `TimeoutError` carries it as `info`. */
-export interface TimeoutInfo<A = unknown> {
+export interface TimeoutInfo<A = unknown, M = unknown> {
   /** Number of values seen before the timeout. */
   readonly seen: number;
   /** The last value seen, or `null` if none. */
   readonly lastValue: A | null;
+  /** Metadata supplied by the timeout policy; `null` in the default policy. */
+  readonly meta: M;
 }
 
-export interface TimeoutError extends TaggedError<'TimeoutError'> {
-  readonly info: TimeoutInfo;
+export interface TimeoutError<A = unknown, M = unknown> extends TaggedError<'TimeoutError'> {
+  readonly info: TimeoutInfo<A, M>;
 }
-export const timeoutError = (
-  info: TimeoutInfo = { seen: 0, lastValue: null },
+type LegacyTimeoutInfo<A> = Omit<TimeoutInfo<A, null>, 'meta'>;
+
+export function timeoutError<A, M>(info: TimeoutInfo<A, M>, message?: string): TimeoutError<A, M>;
+/** Existing calls without metadata remain valid and receive null metadata. */
+export function timeoutError<A = unknown>(info?: LegacyTimeoutInfo<A>, message?: string): TimeoutError<A, null>;
+export function timeoutError<A, M>(
+  info: TimeoutInfo<A, M> | LegacyTimeoutInfo<A> = { seen: 0, lastValue: null },
   message: string = 'Timeout has occurred',
-): TimeoutError => Object.assign(new Error(message), { name: 'TimeoutError' as const, info });
+): TimeoutError<A, M | null> {
+  const fullInfo: TimeoutInfo<A, M | null> = 'meta' in info ? info : { ...info, meta: null };
+  return Object.assign(new Error(message), { name: 'TimeoutError' as const, info: fullInfo });
+}
 export const isTimeoutError = (e: unknown): e is TimeoutError => is('TimeoutError')(e);
 
 export type ArgumentOutOfRangeError = TaggedError<'ArgumentOutOfRangeError'>;

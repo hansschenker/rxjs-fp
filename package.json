@@ -1,13 +1,14 @@
 {
   "name": "rxjs-fp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A pure functional, strongly typed reactive extensions library for TypeScript: no classes, no `this`, lawful typeclasses, operators as pure Mealy machines.",
   "type": "module",
   "license": "MIT",
   "author": "Hans Schenker",
   "contributors": [
     "Hans Schenker",
-    "Claude Opus 5.5 (Anthropic) <noreply@anthropic.com>"
+    "Claude Opus 5.5 (Anthropic) <noreply@anthropic.com>",
+    "ChatGPT GPT-6 Astra Pro (OpenAI) <noreply@openai.com>"
   ],
   "repository": {
     "type": "git",
@@ -84,7 +85,8 @@
     "check": "npm run typecheck && npm test && npm run build",
     "example:todo": "vite examples/todo/browser",
     "example:todo:node": "tsx examples/todo/node-demo.ts",
-    "example:users": "tsx examples/users/demo.ts"
+    "example:users": "tsx examples/users/demo.ts",
+    "example:policies": "node --import tsx examples/policies/demo.ts"
   },
   "engines": {
     "node": ">=18"
@@ -92,7 +94,7 @@
   "devDependencies": {
     "@types/node": "^22.20.5",
     "fast-check": "^4.10.2",
-    "rxjs": "^7.8.2",
+    "rxjs": "7.8.2",
     "tsx": "^4.23.15",
     "typescript": "~5.9",
     "vite": "^6.4.4",

@@ -1,5 +1,11 @@
 # Project architecture: reactive extensions without a single `class`
 
+> **Architecture snapshot: version 0.1.0.** The source excerpts and line references below describe
+> the design before the algebraic policy API introduced in 0.2.0. The closure-based runtime remains;
+> the current `repeat`, `retry`, sharing, throttling and timeout APIs are documented in
+> [Algebraic operator policies](algebraic-policies.md). Use that guide for current signatures.
+
+
 `docs/architecture.md` is the map — which directory holds what, and the execution model in brief.
 This document is the **argument**: what object-oriented machinery actually buys you in a library like
 RxJS, what replaces each piece of it here, and why the result is not merely class-free on a

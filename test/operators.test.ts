@@ -43,7 +43,13 @@ import {
   times,
   timesWithDelay,
   exponentialBackoff,
-  type RetryPolicy,
+  additionalRetries,
+  immediate,
+  keepCount,
+  totalRuns,
+  defaultTimeoutErrorPolicy,
+  positiveMilliseconds,
+  type RetryDecisionPolicy,
   scan,
   skip,
   skipWhile,
@@ -269,7 +275,7 @@ describe('time (virtual scheduler, injected)', () => {
 
   it('throttleTime (leading)', () => {
     runMarbles(({ cold, scheduler, expectObservable }) => {
-      expectObservable(cold('abc---de|').pipe(throttleTime(3, scheduler))).toBe('a-----d-|');
+      expectObservable(cold('abc---de|').pipe(throttleTime(3, 'leading-only', scheduler))).toBe('a-----d-|');
     });
   });
 
@@ -309,11 +315,11 @@ describe('time (virtual scheduler, injected)', () => {
   it('timeout errors with TimeoutError', () => {
     runMarbles(({ cold, scheduler, expectObservable }) => {
       const err = Object.assign(new Error('Timeout has occurred'), { name: 'TimeoutError' });
-      expectObservable(cold('a----b|').pipe(timeout(3, scheduler))).toBe('a--#', undefined, err);
+      expectObservable(cold('a----b|').pipe(timeout(defaultTimeoutErrorPolicy<string>({ kind: 'each-gap', duration: positiveMilliseconds(3) }), scheduler))).toBe('a--#', undefined, err);
     });
     let e: unknown;
     runMarbles(({ cold, scheduler }) => {
-      cold('-----a|').pipe(timeout(2, scheduler)).subscribe({ error: (x) => (e = x) });
+      cold('-----a|').pipe(timeout(defaultTimeoutErrorPolicy<string>({ kind: 'each-gap', duration: positiveMilliseconds(2) }), scheduler)).subscribe({ error: (x) => (e = x) });
     });
     expect(isTimeoutError(e)).toBe(true);
   });
@@ -321,19 +327,19 @@ describe('time (virtual scheduler, injected)', () => {
   it('TimeoutError carries the values seen before the timeout', () => {
     let e: unknown;
     runMarbles(({ cold, scheduler }) => {
-      cold('ab-----c|').pipe(timeout(3, scheduler)).subscribe({ error: (x) => (e = x) });
+      cold('ab-----c|').pipe(timeout(defaultTimeoutErrorPolicy<string>({ kind: 'each-gap', duration: positiveMilliseconds(3) }), scheduler)).subscribe({ error: (x) => (e = x) });
     });
-    expect(isTimeoutError(e) && e.info).toEqual({ seen: 2, lastValue: 'b' });
+    expect(isTimeoutError(e) && e.info).toEqual({ seen: 2, lastValue: 'b', meta: null });
   });
 
   it('catchTimeout switches to the fallback on a timeout only', () => {
     runMarbles(({ cold, scheduler, expectObservable }) => {
-      expectObservable(cold('a----b|').pipe(timeout(3, scheduler), catchTimeout((info) => of(`seen ${info.seen}`)))).toBe(
+      expectObservable(cold('a----b|').pipe(timeout(defaultTimeoutErrorPolicy<string>({ kind: 'each-gap', duration: positiveMilliseconds(3) }), scheduler), catchTimeout((info) => of(`seen ${info.seen}`)))).toBe(
         'a--(x|)',
         { a: 'a', x: 'seen 1' },
       );
       const other = new Error('not a timeout');
-      expectObservable(cold('a#', undefined, other).pipe(timeout(3, scheduler), catchTimeout(() => of('fallback')))).toBe(
+      expectObservable(cold('a#', undefined, other).pipe(timeout(defaultTimeoutErrorPolicy<string>({ kind: 'each-gap', duration: positiveMilliseconds(3) }), scheduler), catchTimeout(() => of('fallback')))).toBe(
         'a#',
         undefined,
         other,
@@ -366,7 +372,7 @@ describe('error handling', () => {
 
   it('retry resubscribes', () => {
     runMarbles(({ cold, expectObservable }) => {
-      expectObservable(cold('a#').pipe(retry(2))).toBe('aaa#');
+      expectObservable(cold('a#').pipe(retry({ limit: additionalRetries(2), delay: immediate(), counter: keepCount() }))).toBe('aaa#');
     });
   });
 
@@ -387,7 +393,7 @@ describe('error handling', () => {
   it('retryWith retries only the errors the policy accepts', () => {
     const transient = new Error('transient');
     const fatal = new Error('fatal');
-    const onlyTransient: RetryPolicy = (e, n) => (e === transient && n <= 5 ? retryNow : giveUp);
+    const onlyTransient: RetryDecisionPolicy = (e, n) => (e === transient && n <= 5 ? retryNow : giveUp);
     runMarbles(({ cold, expectObservable }) => {
       expectObservable(cold('a#', undefined, transient).pipe(retryWith(times(1)))).toBe('aa#', undefined, transient);
       expectObservable(cold('a#', undefined, fatal).pipe(retryWith(onlyTransient))).toBe('a#', undefined, fatal);
@@ -413,7 +419,7 @@ describe('error handling', () => {
   });
 
   it('repeat resubscribes on completion', () => {
-    expect(collect(of(1, 2).pipe(repeat(3)))).toEqual([1, 2, 1, 2, 1, 2, '|']);
+    expect(collect(of(1, 2).pipe(repeat({ limit: totalRuns(3), delay: immediate() })))).toEqual([1, 2, 1, 2, 1, 2, '|']);
   });
 
   it('finalize runs on complete, error and unsubscribe', () => {

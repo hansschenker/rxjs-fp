@@ -30,7 +30,6 @@ import {
   debounce,
   defer,
   from,
-  Leading,
   LeadingAndTrailing,
   map,
   race,
@@ -38,6 +37,7 @@ import {
   sample,
   scan,
   take,
+  throttle,
   throttleWith,
   timer,
   Trailing,
@@ -45,16 +45,21 @@ import {
   windowToggle,
   windowWhen,
 } from '../kernel.js';
-import type { Observable, ObservableInput, Operator, Scheduler, ThrottleStrategy } from '../kernel.js';
+import type { Observable, ObservableInput, Operator, Scheduler, ThrottleMode } from '../kernel.js';
 import { concat, merge, mergeMap } from './concurrency.js';
 import { of } from './creation.js';
 import { skip, toArray } from './values.js';
 
 // The family's kernel members, so the family is importable from one place
-export { debounce, throttleWith, audit, sample, window, timeout, timeoutFirst, timeoutFirstAndEach, observeOn, subscribeOn } from '../kernel.js';
+export { debounce, throttle, throttleWith, audit, sample, window, timeout, timeoutFirst, timeoutFirstAndEach, observeOn, subscribeOn } from '../kernel.js';
 export { windowToggle, windowWhen, bufferWhen } from '../kernel.js';
 export { Leading, Trailing, LeadingAndTrailing, timer } from '../kernel.js';
-export type { ThrottleStrategy } from '../kernel.js';
+export type { ThrottleMode, ThrottleStrategy } from '../kernel.js';
+export { deadlineAfter, deadlineAt, defaultTimeoutErrorPolicy } from '../kernel.js';
+export type {
+  Deadline, TimeoutTiming, RaiseTimeoutError, SwitchTo, TimeoutOutcome,
+  TimeoutPolicy, TimeoutErrorPolicy, TimeoutSwitchPolicy, TimeoutInfo,
+} from '../kernel.js';
 
 /** A projection: emits `value` once, `ms` later. The building block of `delay`. */
 export const emitAfter =
@@ -74,17 +79,21 @@ export const debounceTime = <A>(ms: number, scheduler: Scheduler = asyncSchedule
   debounce<A>(() => timer(ms, undefined, scheduler));
 
 /**
- * Lets values through in windows of `ms`, as the `strategy` says. With a
- * trailing strategy, a pending trailing value delays completion until its
- * window ends. Usually used through the three named variants below.
+ * A timer supplies the duration; the canonical throttle interprets the mode.
+ * The scheduler remains the last argument, separate from emission policy.
  */
-export const throttleTimeWith =
-  (strategy: ThrottleStrategy) =>
-  <A>(ms: number, scheduler: Scheduler = asyncScheduler): Operator<A, A> =>
-    throttleWith(strategy)<A>(() => timer(ms, undefined, scheduler));
+export const throttleTime = <A>(
+  ms: number,
+  mode: ThrottleMode = 'leading-only',
+  scheduler: Scheduler = asyncScheduler,
+): Operator<A, A> => throttle<A>(() => timer(ms, undefined, scheduler), mode);
 
-/** Emits the first value of each `ms` window at once. */
-export const throttleTime = throttleTimeWith(Leading);
+/** Partial application of the same canonical interpreter. */
+export const throttleTimeWith =
+  (mode: ThrottleMode) =>
+  <A>(ms: number, scheduler: Scheduler = asyncScheduler): Operator<A, A> =>
+    throttleTime<A>(ms, mode, scheduler);
+
 /** Emits the last value of each `ms` window when the window ends. */
 export const throttleTimeTrailing = throttleTimeWith(Trailing);
 /** Emits the first value of each `ms` window at once, and the last one when the window ends. */
@@ -104,8 +113,6 @@ export const sampleTime = <A>(ms: number, scheduler: Scheduler = asyncScheduler)
 
 // --- throttle with a duration selector ---------------------------------------
 
-/** Emits the first value of each window at once; the window lasts until `durationSelector(value)` emits. */
-export const throttle = throttleWith(Leading);
 /** Emits the last value of each window when `durationSelector(value)` emits. */
 export const throttleTrailing = throttleWith(Trailing);
 /** Emits the first value of each window at once, and the last one when the window ends. */

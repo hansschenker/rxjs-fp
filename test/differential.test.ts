@@ -109,7 +109,7 @@ describe('duration-selector operators match RxJS', () => {
     theirs: ({ a }) => a.pipe(rx.timestamp(), rx.timeInterval(), rx.map((x) => `${x.value.value}@${x.value.timestamp}+${x.interval}`)),
   });
   prop1('timeout config: each', {
-    ours: ({ a }, s) => a.pipe(fp.timeout(3, s)),
+    ours: ({ a }, s) => a.pipe(fp.timeout(fp.defaultTimeoutErrorPolicy<string>({ kind: 'each-gap', duration: fp.positiveMilliseconds(3) }), s)),
     theirs: ({ a }) => a.pipe(rx.timeout({ each: 3 })),
   });
   prop1('timeout config: first only', {
@@ -117,7 +117,7 @@ describe('duration-selector operators match RxJS', () => {
     theirs: ({ a }) => a.pipe(rx.timeout({ first: 3 })),
   });
   prop1('timeout config: with', {
-    ours: ({ a }, s) => a.pipe(fp.timeout(2, s), fp.catchTimeout((i) => fp.of(`seen${i.seen}`))),
+    ours: ({ a }, s) => a.pipe(fp.timeout(fp.defaultTimeoutErrorPolicy<string>({ kind: 'each-gap', duration: fp.positiveMilliseconds(2) }), s), fp.catchTimeout((i) => fp.of(`seen${i.seen}`))),
     theirs: ({ a }) => a.pipe(rx.timeout({ each: 2, with: (i) => rx.of(`seen${i.seen}`) })),
   });
   prop1('retryWith(timesWithDelay) vs retry({ count, delay })', {
@@ -310,8 +310,11 @@ describe('share lifecycles match RxJS', () => {
   it('share() vs share()', () => {
     expect(scenarioOurs(fp.share())).toEqual(scenarioTheirs(rx.share()));
   });
-  it('shareReplay(2) vs shareReplay(2)', () => {
-    expect(scenarioOurs(fp.shareReplay(2))).toEqual(scenarioTheirs(rx.shareReplay(2)));
+  it('shareReplay with a two-value bound vs shareReplay(2)', () => {
+    expect(scenarioOurs(fp.shareReplay({
+      replay: { maxValues: fp.limited(fp.positiveInteger(2)), maxAge: fp.unlimited() },
+      onNoSubscribers: 'keep-connected',
+    }))).toEqual(scenarioTheirs(rx.shareReplay(2)));
   });
   it('shareLatest() vs share({ connector: () => new ReplaySubject(1) })', () => {
     expect(scenarioOurs(fp.shareLatest())).toEqual(scenarioTheirs(rx.share({ connector: () => new rx.ReplaySubject<number>(1) })));
@@ -494,7 +497,7 @@ describe('concurrency vocabulary matches RxJS (identity tests, docs/kernel.md)',
 describe('time vocabulary matches RxJS (identity tests, docs/kernel.md)', () => {
   prop1('delay', { ours: ({ a }, s) => a.pipe(fp.delay(3, s)), theirs: ({ a }, s) => a.pipe(rx.delay(3, s)) });
   prop1('debounceTime', { ours: ({ a }, s) => a.pipe(fp.debounceTime(2, s)), theirs: ({ a }, s) => a.pipe(rx.debounceTime(2, s)) });
-  prop1('throttleTime', { ours: ({ a }, s) => a.pipe(fp.throttleTime(3, s)), theirs: ({ a }, s) => a.pipe(rx.throttleTime(3, s)) });
+  prop1('throttleTime', { ours: ({ a }, s) => a.pipe(fp.throttleTime(3, 'leading-only', s)), theirs: ({ a }, s) => a.pipe(rx.throttleTime(3, s)) });
   prop1('throttleTimeTrailing', {
     ours: ({ a }, s) => a.pipe(fp.throttleTimeTrailing(3, s)),
     theirs: ({ a }, s) => a.pipe(rx.throttleTime(3, s, { leading: false, trailing: true })),

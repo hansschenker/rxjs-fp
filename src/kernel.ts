@@ -21,6 +21,7 @@ export { emptyError, argumentOutOfRangeError, notFoundError, sequenceError, isTi
 export type { TimeoutInfo } from './core/errors.js';
 export { some, none, isSome } from './fp/option.js';
 export type { Option } from './fp/option.js';
+export * from './policies/core.js';
 
 // Creation
 export { observable } from './core/observable.js';
@@ -38,9 +39,13 @@ export type { Notification } from './operators/transform.js';
 export { throwIfEmpty, sequenceEqual } from './operators/conditional.js';
 
 // Time-based
-export { debounce, throttleWith, audit, sample, timeout, timeoutFirst, timeoutFirstAndEach, observeOn, subscribeOn } from './operators/time.js';
+export { debounce, throttle, throttleWith, audit, sample, timeout, timeoutFirst, timeoutFirstAndEach, observeOn, subscribeOn } from './operators/time.js';
 export { Leading, Trailing, LeadingAndTrailing } from './operators/time.js';
-export type { ThrottleStrategy } from './operators/time.js';
+export { deadlineAfter, deadlineAt, defaultTimeoutErrorPolicy } from './operators/time.js';
+export type {
+  ThrottleMode, ThrottleStrategy, Deadline, TimeoutTiming, RaiseTimeoutError,
+  SwitchTo, TimeoutOutcome, TimeoutPolicy, TimeoutErrorPolicy, TimeoutSwitchPolicy,
+} from './operators/time.js';
 export { window, windowToggle, windowWhen, bufferWhen } from './operators/window.js';
 export { groupBy, groupByUntil } from './operators/group.js';
 export type { GroupedObservable } from './operators/group.js';
@@ -53,8 +58,16 @@ export type { FlattenStrategy } from './operators/flatten.js';
 export { combineLatest, zip, withLatestFrom, race } from './operators/combine.js';
 
 // Errors and effects
-export { catchError, finalize, retryWith, retryConsecutiveWith, repeat, retryNow, retryAfter, giveUp } from './operators/error.js';
-export type { RetryDecision, RetryPolicy } from './operators/error.js';
+export {
+  catchError, finalize, retry, retryWith, retryConsecutiveWith, repeat,
+  retryNow, retryAfter, giveUp, totalRuns, unlimitedRuns,
+  additionalRetries, unlimitedRetries, repeatOnSignal, retryOnSignal,
+  keepCount, resetOnNext, defaultRepeatPolicy, defaultRetryPolicy,
+} from './operators/error.js';
+export type {
+  RetryDecision, RetryDecisionPolicy, RetryPolicy, RetryLimit, RetrySignal,
+  RetryDelay, RetryCounter, RepeatLimit, RepeatSignal, RepeatDelay, RepeatPolicy,
+} from './operators/error.js';
 
 // Multicasting
 export {
@@ -67,7 +80,14 @@ export {
   connect,
   refCount,
   shareWith,
+  share,
+  shareReplay,
+  defaultSharePolicy,
+  defaultShareReplayPolicy,
   WhileSubscribed,
   Cached,
 } from './subject/subject.js';
-export type { Subject, Connectable, ShareLifecycle } from './subject/subject.js';
+export type {
+  Subject, Connectable, ShareLifecycle, ResetPolicy, SharePolicy,
+  ReplayBounds, IdlePolicy, ShareReplayPolicy,
+} from './subject/subject.js';
