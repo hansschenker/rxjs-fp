@@ -4,8 +4,7 @@ import { of } from '../vocabulary/creation.js';
 import { map } from '../operators/transform.js';
 import { filter as filterOp } from '../operators/filtering.js';
 import { filterMap as filterMapOp } from '../vocabulary/values.js';
-import { concat, concatMap, merge, mergeMap } from '../vocabulary/concurrency.js';
-import { combineLatest } from '../operators/combine.js';
+import { concat, merge, mergeMap } from '../vocabulary/concurrency.js';
 import { catchError } from '../operators/error.js';
 import { isLeft, isRight, left, right, type Either } from './either.js';
 import { isNone, none, some, type Option } from './option.js';
@@ -13,16 +12,16 @@ import type * as TC from './typeclasses.js';
 import type { Separated } from './typeclasses.js';
 
 /**
- * Lawful typeclass instances for Observable.
+ * Lawful typeclass instances for Observable, kept to the ones that read
+ * naturally to an RxJS user: Functor (`map`), Compactable and Filterable
+ * (`filter`, `filterMap`, `partition`, `compact`, `separate`), and the two
+ * Monoids (`merge` and `concat`, with `EMPTY` as identity).
  *
- * Design decisions (each one fixes an inconsistency found in the earlier
- * rxjs-source-v7-fp experiment):
- *  - `ap` is *derived from* `chain`, so Monad and Apply agree. A
- *    `combineLatest`-based ap is useful, but it is not the Monad's ap, so
- *    it is exported separately as `apLatest` and makes no law claims.
- *  - `alt` is `merge` and `zero` is `EMPTY`. They satisfy the Alt/Plus laws
- *    and agree with the merge Monoid. Error recovery (`catchError`) is not
- *    `alt`; it is exported as `orElse`.
+ * The Monad, Applicative and Alternative instances (`MonadMerge`,
+ * `MonadConcat`, `ap`, `apLatest`, `alt`, `orElse`) were removed: an RxJS
+ * user writes `mergeMap`, `concatMap`, `combineLatest`, `merge` and
+ * `catchError`. The Monad laws are still tested, directly on `of`,
+ * `mergeMap` and `concatMap` (test/laws.test.ts).
  */
 
 export const URI = 'Observable' as const;
@@ -31,15 +30,7 @@ export type URI = typeof URI;
 // Typeclass functions are unary: operators pass an index as a second
 // argument, which must not leak into lawful instances.
 const _map = <A, B>(fa: Observable<A>, f: (a: A) => B): Observable<B> => map((a: A) => f(a))(fa);
-const _of = <A>(a: A): Observable<A> => of(a);
 const _mergeChain = <A, B>(fa: Observable<A>, f: (a: A) => Observable<B>): Observable<B> => mergeMap((a: A) => f(a))(fa);
-const _concatChain = <A, B>(fa: Observable<A>, f: (a: A) => Observable<B>): Observable<B> => concatMap((a: A) => f(a))(fa);
-const apFrom =
-  (chainF: <A, B>(fa: Observable<A>, f: (a: A) => Observable<B>) => Observable<B>) =>
-  <A, B>(fab: Observable<(a: A) => B>, fa: Observable<A>): Observable<B> =>
-    chainF(fab, (f) => _map(fa, f));
-const _alt = <A>(fx: Observable<A>, fy: () => Observable<A>): Observable<A> => merge(fx, fy());
-const _zero = <A>(): Observable<A> => EMPTY;
 const _filterMap = <A, B>(fa: Observable<A>, f: (a: A) => Option<B>): Observable<B> => filterMapOp((a: A) => f(a))(fa);
 const _partitionMap = <A, B, C>(fa: Observable<A>, f: (a: A) => Either<B, C>): Separated<Observable<B>, Observable<C>> => ({
   left: filterMapOp((a: A) => {
@@ -53,16 +44,6 @@ const _partitionMap = <A, B, C>(fa: Observable<A>, f: (a: A) => Either<B, C>): S
 });
 
 export const ObservableFunctor: TC.Functor<URI> = { URI, map: _map };
-
-/** The default Monad: `chain` = `mergeMap`. */
-export const MonadMerge: TC.Monad<URI> = { URI, map: _map, of: _of, chain: _mergeChain, ap: apFrom(_mergeChain) };
-
-/** A second lawful Monad: `chain` = `concatMap` (sequential). */
-export const MonadConcat: TC.Monad<URI> = { URI, map: _map, of: _of, chain: _concatChain, ap: apFrom(_concatChain) };
-
-export const ObservablePlus: TC.Plus<URI> = { URI, map: _map, alt: _alt, zero: _zero };
-
-export const ObservableAlternative: TC.Alternative<URI> = { ...MonadMerge, alt: _alt, zero: _zero };
 
 export const ObservableCompactable: TC.Compactable<URI> = {
   URI,
@@ -101,30 +82,6 @@ export const getConcatMonoid = <A>(): TC.Monoid<Observable<A>> => ({ concat: (x,
 
 /** Monadic bind (`mergeMap` without index). */
 export const chain = <A, B>(f: (a: A) => Observable<B>): Operator<A, B> => mergeMap((a: A) => f(a));
-
-/** Apply, derived from chain. `pipe(fab, ap(fa))` */
-export const ap =
-  <A>(fa: Observable<A>) =>
-  <B>(fab: Observable<(a: A) => B>): Observable<B> =>
-    MonadMerge.ap(fab, fa);
-
-/**
- * A "latest values" apply built on `combineLatest`. Handy for UI state,
- * but it is NOT the Monad's `ap` and makes no law claims.
- */
-export const apLatest =
-  <A>(fa: Observable<A>) =>
-  <B>(fab: Observable<(a: A) => B>): Observable<B> =>
-    map(([f, a]: [(a: A) => B, A]) => f(a))(combineLatest([fab, fa] as const));
-
-/** `alt` as an operator: merges in the alternative. */
-export const alt =
-  <A>(that: () => Observable<A>): Operator<A, A> =>
-  (fa) =>
-    _alt(fa, that);
-
-/** Error recovery: on error, continue with `that(err)`. Not part of Alt. */
-export const orElse = <A, B>(that: (err: unknown) => Observable<B>): Operator<A, A | B> => catchError((e: unknown) => that(e));
 
 export const flatten = <A>(ffa: Observable<Observable<A>>): Observable<A> => _mergeChain(ffa, (fa) => fa);
 

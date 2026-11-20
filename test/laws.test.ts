@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
-import { filter, map, type Observable } from '../src/index.js';
+import { concatMap, EMPTY, filter, map, merge, mergeMap, of, type Observable } from '../src/index.js';
 import {
-  MonadConcat,
-  MonadMerge,
   ObservableFilterable as F,
-  ObservablePlus as P,
   getConcatMonoid,
   getMergeMonoid,
   none,
@@ -62,10 +59,13 @@ describe('Functor laws', () => {
 });
 
 /**
- * MonadMerge is lawful *in time*: both sides of every law produce the same
+ * The Monad laws, stated on the operators users write: `of` with `mergeMap`,
+ * and `of` with `concatMap` (`chain` below is the operator under test).
+ *
+ * With `mergeMap` they hold *in time*: both sides of every law produce the same
  * notifications at the same virtual frames (up to simultaneity).
  *
- * MonadConcat is lawful *up to timing*, for error-free streams: both sides
+ * With `concatMap` they hold *up to timing*, for error-free streams: both sides
  * produce the same notification sequence, but associativity can change WHEN
  * things happen. Example: in chain(chain(m, f), g) the g-inners of f(x₁)
  * overlap f(x₂), while in chain(m, x => chain(f(x), g)) they cannot.
@@ -73,18 +73,22 @@ describe('Functor laws', () => {
  */
 const errorFree = (n: number) => timedSpec(n).filter((s) => s.end !== 'error');
 
+type ChainOf = <A, B>(fa: Observable<A>, f: (a: A) => Observable<B>) => Observable<B>;
+const viaMergeMap: ChainOf = (fa, f) => fa.pipe(mergeMap((a) => f(a)));
+const viaConcatMap: ChainOf = (fa, f) => fa.pipe(concatMap((a) => f(a)));
+
 const monadSuites = [
-  { name: 'MonadMerge', M: MonadMerge, eq: sameUpToSimultaneity, spec: timedSpec },
-  { name: 'MonadConcat', M: MonadConcat, eq: sameSequence, spec: errorFree },
+  { name: 'mergeMap', chain: viaMergeMap, eq: sameUpToSimultaneity, spec: timedSpec },
+  { name: 'concatMap', chain: viaConcatMap, eq: sameSequence, spec: errorFree },
 ] as const;
 
-for (const { name, M, eq, spec: arb } of monadSuites) {
-  describe(`${name} laws`, () => {
+for (const { name, chain, eq, spec: arb } of monadSuites) {
+  describe(`Monad laws for of and ${name}`, () => {
     it('left identity: chain(of(a), f) ≡ f(a)', () => {
       fc.assert(
         fc.property(fc.integer(), specFn(arb(3)), (a, f) =>
           eq(
-            (s) => M.chain(M.of(a), (x: number) => fromSpec(s)(f(x))),
+            (s) => chain(of(a), (x: number) => fromSpec(s)(f(x))),
             (s) => fromSpec(s)(f(a)),
           ),
         ),
@@ -94,7 +98,7 @@ for (const { name, M, eq, spec: arb } of monadSuites) {
 
     it('right identity: chain(m, of) ≡ m', () => {
       fc.assert(
-        fc.property(arb(5), (spec) => eq((s) => M.chain(fromSpec(s)(spec), M.of), (s) => fromSpec(s)(spec))),
+        fc.property(arb(5), (spec) => eq((s) => chain(fromSpec(s)(spec), (x: number) => of(x)), (s) => fromSpec(s)(spec))),
         runs,
       );
     });
@@ -103,20 +107,8 @@ for (const { name, M, eq, spec: arb } of monadSuites) {
       fc.assert(
         fc.property(arb(3), specFn(arb(3)), specFn(arb(2)), (spec, f, g) =>
           eq(
-            (s) => M.chain(M.chain(fromSpec(s)(spec), (x: number) => fromSpec(s)(f(x))), (y: number) => fromSpec(s)(g(y))),
-            (s) => M.chain(fromSpec(s)(spec), (x: number) => M.chain(fromSpec(s)(f(x)), (y: number) => fromSpec(s)(g(y)))),
-          ),
-        ),
-        runs,
-      );
-    });
-
-    it('consistency: ap ≡ ap derived from chain', () => {
-      fc.assert(
-        fc.property(arb(3), arb(3), intFn, (fs, xs, f) =>
-          eq(
-            (s) => M.ap(M.map(fromSpec(s)(fs), (k: number) => (x: number) => f(x) + k), fromSpec(s)(xs)),
-            (s) => M.chain(M.map(fromSpec(s)(fs), (k: number) => (x: number) => f(x) + k), (h) => M.map(fromSpec(s)(xs), h)),
+            (s) => chain(chain(fromSpec(s)(spec), (x: number) => fromSpec(s)(f(x))), (y: number) => fromSpec(s)(g(y))),
+            (s) => chain(fromSpec(s)(spec), (x: number) => chain(fromSpec(s)(f(x)), (y: number) => fromSpec(s)(g(y)))),
           ),
         ),
         runs,
@@ -125,36 +117,36 @@ for (const { name, M, eq, spec: arb } of monadSuites) {
   });
 }
 
-describe('Alt / Plus laws (alt = merge, zero = EMPTY)', () => {
+describe('merge laws (merge with EMPTY as identity, map distributes over merge)', () => {
   it('associativity', () => {
     fc.assert(
       fc.property(timedSpec(), timedSpec(), timedSpec(), (a, b, c) =>
         sameUpToSimultaneity(
-          (s) => P.alt(P.alt(fromSpec(s)(a), () => fromSpec(s)(b)), () => fromSpec(s)(c)),
-          (s) => P.alt(fromSpec(s)(a), () => P.alt(fromSpec(s)(b), () => fromSpec(s)(c))),
+          (s) => merge(merge(fromSpec(s)(a), fromSpec(s)(b)), fromSpec(s)(c)),
+          (s) => merge(fromSpec(s)(a), merge(fromSpec(s)(b), fromSpec(s)(c))),
         ),
       ),
       runs,
     );
   });
 
-  it('distributivity: map(alt(x, y), f) ≡ alt(map(x, f), map(y, f))', () => {
+  it('distributivity: merge(x, y) then map(f) ≡ merge(x then map(f), y then map(f))', () => {
     fc.assert(
       fc.property(timedSpec(), timedSpec(), intFn, (a, b, f) =>
         sameUpToSimultaneity(
-          (s) => P.map(P.alt(fromSpec(s)(a), () => fromSpec(s)(b)), f),
-          (s) => P.alt(P.map(fromSpec(s)(a), f), () => P.map(fromSpec(s)(b), f)),
+          (s) => merge(fromSpec(s)(a), fromSpec(s)(b)).pipe(map((x: number) => f(x))),
+          (s) => merge(fromSpec(s)(a).pipe(map((x: number) => f(x))), fromSpec(s)(b).pipe(map((x: number) => f(x)))),
         ),
       ),
       runs,
     );
   });
 
-  it('left and right identity: alt(zero, fa) ≡ fa ≡ alt(fa, zero)', () => {
+  it('left and right identity: merge(EMPTY, fa) ≡ fa ≡ merge(fa, EMPTY)', () => {
     fc.assert(
       fc.property(timedSpec(), (a) => {
-        same((s) => P.alt(P.zero<number>(), () => fromSpec(s)(a)), (s) => fromSpec(s)(a));
-        same((s) => P.alt(fromSpec(s)(a), () => P.zero<number>()), (s) => fromSpec(s)(a));
+        same((s) => merge(EMPTY, fromSpec(s)(a)), (s) => fromSpec(s)(a));
+        same((s) => merge(fromSpec(s)(a), EMPTY), (s) => fromSpec(s)(a));
       }),
       runs,
     );
