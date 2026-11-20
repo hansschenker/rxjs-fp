@@ -494,14 +494,16 @@ const connectableCore = <A>(source: Observable<A>, connector: () => Subject<A>, 
     connection = conn;
     const s = subject;
     if (resetOnDisconnect) conn.add(() => (subject = connector()));
+    // The connector's Subject may be held (and disposed) by the caller; like
+    // the share connection, report what it throws and keep going.
     subscribeWithin(source, conn, {
-      next: (a) => s.next(a),
+      next: (a) => reportCallbackError(() => s.next(a)),
       error: (e) => {
-        s.error(e);
+        reportCallbackError(() => s.error(e));
         conn.unsubscribe();
       },
       complete: () => {
-        s.complete();
+        reportCallbackError(() => s.complete());
         conn.unsubscribe();
       },
     });

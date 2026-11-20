@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import * as rx from 'rxjs';
 import {
   EMPTY,
@@ -20,6 +20,7 @@ import {
   groupBy,
   isEmptyError,
   isNotFoundError,
+  isObjectUnsubscribedError,
   isSequenceError,
   map,
   mergeMap,
@@ -217,6 +218,27 @@ describe('connectable', () => {
     first.unsubscribe();
     c.connect();
     expect(subscriptions).toBe(2);
+  });
+
+  it('reports a disposed connector subject on a fresh task and keeps the connection open', () => {
+    vi.useFakeTimers();
+    try {
+      const held = createSubject<number>();
+      const src = createSubject<number>();
+      const conn = connectable(src, () => held).connect();
+      held.dispose();
+      expect(() => src.next(1)).not.toThrow(); // was: ObjectUnsubscribedError thrown back into the source
+      expect(conn.closed).toBe(false);
+      let reported: unknown;
+      try {
+        vi.runAllTimers();
+      } catch (e) {
+        reported = e;
+      }
+      expect(isObjectUnsubscribedError(reported)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
