@@ -209,15 +209,19 @@ export const pipeArray =
 ```
 
 That loop is the entire implementation behind `pipe(value, ...fns)`, `flow(...fns)` and
-`Observable.pipe`. Everything else in `src/core/pipe.ts` is overload signatures: ten for `pipe`,
-eight for `flow`, and in `src/core/types.ts` a `PipeMethod<A>` interface with eleven call signatures
-whose last one accepts `...rest` so chains longer than nine operators still compile, with the tail degrading to
-`Observable<unknown>` — the same ceiling RxJS has, for the same reason.
+`Observable.pipe`. Apart from `identity` and `noop`, everything else in `src/core/pipe.ts` is
+overload signatures: eleven for `pipe`, nine for `flow`, and in `src/core/types.ts` a `PipeMethod<A>`
+interface with eleven call signatures. In each case the last one accepts `...rest`, so a chain longer
+than nine steps (eight for `flow`, whose first function is variadic and may take several arguments)
+still compiles, with the tail degrading to `unknown` — the same soft ceiling RxJS 7 gives both its
+method and its free `pipe`, for the same reason. `test/types.test.ts` pins all three.
 
-The deeper point: RxJS's `pipe` is `Observable.prototype.pipe`, which calls `pipeFromArray` and
-therefore needs `this`. Because an rxjs-fp operator is just `Observable<A> → Observable<B>`,
-composition is ordinary function composition, and `flow(map(f), filter(p))` builds a reusable
-operator with no Observable in sight.
+The point is not that RxJS lacks function composition — it exports a free, point-free `pipe`, and
+`pipe(map(f), filter(p))` there is `flow(map(f), filter(p))` here, a reusable operator with no
+Observable in sight. The difference is convention, borrowed from fp-ts: `pipe` is data-first (a value,
+then functions) and `flow` is point-free, where RxJS overloads the one name for the point-free form
+and has no data-first free function. And the method, as §2 showed, is a closure over the same loop
+rather than a prototype method over `this`.
 
 ---
 
@@ -1141,7 +1145,7 @@ streams, at a run count controlled by the `LAW_RUNS` environment variable (CI se
 | **No shared prototype methods** | RxJS 5 moved to classes partly for V8's inline caches. Closure-per-instance call sites are less friendly to that optimisation. This is the deliberate trade: clarity and testability over the last few percent. |
 | **Stack depth** | Synchronous chains nest producer calls; deep pipes over synchronous sources produce deep stacks, same as RxJS but without class names to orient you in a trace. |
 | **Debuggability** | A stack frame reads `next` or an anonymous arrow rather than `MergeMapSubscriber.prototype._next`. The upside is that `runMachine` lets you debug operator *logic* without a stack at all. |
-| **Type-inference ceiling** | `pipe` is typed by overloads, so the tenth operator onward degrades to `unknown` — exactly RxJS's limitation, from the same cause. |
+| **Type-inference ceiling** | `pipe` and `flow` are typed by overloads, so the tenth step onward (the ninth for `flow`) degrades to `unknown` — exactly RxJS's limitation, from the same cause. |
 | **No `instanceof` for users** | Consumers must use the exported guards (`isObservable`, `isEmptyError`, …) instead of `instanceof`. Across realms this is an improvement; as an API habit it is a difference to document. |
 | **Hooks are less discoverable than overrides** | `makeSubject({ onNext, onSubscribe })` is more compact than three subclasses, but a reader looking for "what does ReplaySubject change?" has to read two closures rather than one class body. |
 

@@ -3,6 +3,7 @@ import {
   EMPTY,
   createSubscription,
   filter,
+  flow,
   isObservable,
   map,
   observable,
@@ -111,6 +112,12 @@ describe('Observable = a function you can cancel', () => {
     const viaFn = collect(pipe(range(1, 5), filter((x: number) => x % 2 === 1), map((x: number) => x * 10)));
     expect(viaMethod).toEqual([10, 30, 50, '|']);
     expect(viaFn).toEqual(viaMethod);
+  });
+
+  it('flow builds a reusable operator with no source in sight', () => {
+    const oddTimesTen = flow(filter((x: number) => x % 2 === 1), map((x: number) => x * 10));
+    expect(collect(oddTimesTen(range(1, 5)))).toEqual([10, 30, 50, '|']);
+    expect(collect(oddTimesTen(of(2, 3)))).toEqual([30, '|']);
   });
 
   it('values are frozen records', () => {

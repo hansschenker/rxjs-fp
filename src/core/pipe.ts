@@ -28,6 +28,8 @@ export function pipe<A, B, C, D, E, F, G>(a: A, ab: (a: A) => B, bc: (b: B) => C
 export function pipe<A, B, C, D, E, F, G, H>(a: A, ab: (a: A) => B, bc: (b: B) => C, cd: (c: C) => D, de: (d: D) => E, ef: (e: E) => F, fg: (f: F) => G, gh: (g: G) => H): H;
 export function pipe<A, B, C, D, E, F, G, H, I>(a: A, ab: (a: A) => B, bc: (b: B) => C, cd: (c: C) => D, de: (d: D) => E, ef: (e: E) => F, fg: (f: F) => G, gh: (g: G) => H, hi: (h: H) => I): I;
 export function pipe<A, B, C, D, E, F, G, H, I, J>(a: A, ab: (a: A) => B, bc: (b: B) => C, cd: (c: C) => D, de: (d: D) => E, ef: (e: E) => F, fg: (f: F) => G, gh: (g: G) => H, hi: (h: H) => I, ij: (i: I) => J): J;
+/** Longer chains: the first nine functions stay type-checked, like RxJS; the tail is `unknown`. */
+export function pipe<A, B, C, D, E, F, G, H, I, J>(a: A, ab: (a: A) => B, bc: (b: B) => C, cd: (c: C) => D, de: (d: D) => E, ef: (e: E) => F, fg: (f: F) => G, gh: (g: G) => H, hi: (h: H) => I, ij: (i: I) => J, ...rest: ReadonlyArray<(x: any) => any>): unknown;
 export function pipe(a: unknown, ...fns: ReadonlyArray<(x: any) => any>): unknown {
   return pipeArray(fns)(a);
 }
@@ -41,6 +43,8 @@ export function flow<A extends readonly unknown[], B, C, D, E, F>(ab: (...a: A) 
 export function flow<A extends readonly unknown[], B, C, D, E, F, G>(ab: (...a: A) => B, bc: (b: B) => C, cd: (c: C) => D, de: (d: D) => E, ef: (e: E) => F, fg: (f: F) => G): (...a: A) => G;
 export function flow<A extends readonly unknown[], B, C, D, E, F, G, H>(ab: (...a: A) => B, bc: (b: B) => C, cd: (c: C) => D, de: (d: D) => E, ef: (e: E) => F, fg: (f: F) => G, gh: (g: G) => H): (...a: A) => H;
 export function flow<A extends readonly unknown[], B, C, D, E, F, G, H, I>(ab: (...a: A) => B, bc: (b: B) => C, cd: (c: C) => D, de: (d: D) => E, ef: (e: E) => F, fg: (f: F) => G, gh: (g: G) => H, hi: (h: H) => I): (...a: A) => I;
+/** Longer chains: the first eight functions stay type-checked; the tail is `unknown`. */
+export function flow<A extends readonly unknown[], B, C, D, E, F, G, H, I>(ab: (...a: A) => B, bc: (b: B) => C, cd: (c: C) => D, de: (d: D) => E, ef: (e: E) => F, fg: (f: F) => G, gh: (g: G) => H, hi: (h: H) => I, ...rest: ReadonlyArray<(x: any) => any>): (...a: A) => unknown;
 export function flow(ab: (...a: readonly unknown[]) => unknown, ...fns: ReadonlyArray<(x: any) => any>) {
   return (...args: readonly unknown[]) => pipeArray(fns)(ab(...args));
 }

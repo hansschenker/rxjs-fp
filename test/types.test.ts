@@ -2,6 +2,7 @@ import { describe, expectTypeOf, it } from 'vitest';
 import {
   combineLatest,
   filter,
+  flow,
   forkJoin,
   map,
   merge,
@@ -58,6 +59,20 @@ describe('static types', () => {
       let_('c', ({ a, b }) => a + b.length),
     );
     expectTypeOf(r).toEqualTypeOf<Observable<{ readonly a: number; readonly b: string; readonly c: number }>>();
+  });
+
+  it('flow starts from a variadic function, and all three pipe forms share the soft ceiling', () => {
+    const add = flow((a: number, b: number) => a + b, (n) => `${n}`);
+    expectTypeOf(add).toEqualTypeOf<(a: number, b: number) => string>();
+    const id = (x: number): number => x;
+    const m = map((x: number) => x);
+    // nine steps stay typed; the tenth (ninth for flow) degrades to unknown instead of failing to compile
+    expectTypeOf(of(1).pipe(m, m, m, m, m, m, m, m, m)).toEqualTypeOf<Observable<number>>();
+    expectTypeOf(of(1).pipe(m, m, m, m, m, m, m, m, m, m)).toEqualTypeOf<Observable<unknown>>();
+    expectTypeOf(pipe(1, id, id, id, id, id, id, id, id, id)).toEqualTypeOf<number>();
+    expectTypeOf(pipe(1, id, id, id, id, id, id, id, id, id, id)).toEqualTypeOf<unknown>();
+    expectTypeOf(flow(id, id, id, id, id, id, id, id)).toEqualTypeOf<(x: number) => number>();
+    expectTypeOf(flow(id, id, id, id, id, id, id, id, id)).toEqualTypeOf<(x: number) => unknown>();
   });
 
   it('rejects ill-typed chains and unchecked forwarding', () => {
