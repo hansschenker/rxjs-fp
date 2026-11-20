@@ -445,10 +445,10 @@ applications of `flatMapWith`, and `mergeAll`/`concatAll`/`switchAll`/`exhaustAl
 to the identity projection. Eight operators from one interpreter and three data constructors — and
 as §7.1 shows, `merge` and `concat` come out of the same interpreter too.
 
-The strategy also decides whether `chain` is lawful. §12 offers `MonadMerge` (lawful in time) and
-`MonadConcat` (lawful up to timing) and nothing for `Switch` or `Exhaust`: those cancel or ignore
-values, and the two nestings in the associativity law place the cancel and ignore points differently,
-so no instance could pass `test/laws.test.ts`.
+The strategy also decides whether the Monad laws hold. `test/laws.test.ts` checks them for `of` with
+`mergeMap` (lawful in time) and with `concatMap` (lawful up to timing), and not for `Switch` or
+`Exhaust`: those cancel or ignore values, and the two nestings in the associativity law place the
+cancel and ignore points differently, so they could not pass.
 
 The one genuinely hard case is `Switch` under re-entrancy, and it is worth reading closely
 (`src/operators/flatten.ts:44-70`). A `generation` counter is bumped per inner, and each inner's
@@ -1026,32 +1026,29 @@ export interface Functor<F extends URIS> {
 ```
 
 An instance is then an object literal, and new types join the registry by module augmentation —
-open-world extension without subclassing. `Monad` is declared as `extends Applicative<F>, Chain<F>`,
-which is interface composition, not class inheritance: no implementation is inherited, only the
-obligation to supply the members.
+open-world extension without subclassing. `Filterable` is declared as `extends Functor<F>,
+Compactable<F>`, which is interface composition, not class inheritance: no implementation is
+inherited, only the obligation to supply the members.
 
-### The instances, and two deliberate refusals
+### The instances, and what was left out
 
 | Instance | Definition | Status |
 |---|---|---|
 | `ObservableFunctor` | `map` | lawful |
-| `MonadMerge` | `chain = mergeMap`, `ap` derived from `chain` | lawful, and the laws hold **in time** |
-| `MonadConcat` | `chain = concatMap`, `ap` derived from `chain` | lawful **up to timing** (see below) |
-| `ObservablePlus` / `ObservableAlternative` | `alt = merge`, `zero = EMPTY` | lawful |
 | `ObservableCompactable` / `ObservableFilterable` | `compact`, `separate`, `filter`, `filterMap`, `partition`, `partitionMap` | lawful |
 | `getMergeMonoid` / `getConcatMonoid` | `concat = merge` or `concat`, `empty = EMPTY` | lawful |
-| `apLatest` | `combineLatest`-based apply | **makes no law claims** |
-| `orElse` | `catchError` | **not `alt`** |
 
-The two refusals are the interesting part, because both are mistakes the earlier
-`rxjs-source-v7-fp` experiment made:
+**Left out on purpose:** the Monad, Applicative and Alternative instances (`MonadMerge`,
+`MonadConcat`, `ObservablePlus`, `ObservableAlternative`) and the operators `ap`, `apLatest`, `alt`
+and `orElse`. They were lawful, but too far from what an RxJS user writes: `mergeMap`, `concatMap`,
+`combineLatest`, `merge` and `catchError`. The laws they stood for are still tested, stated directly
+on those operators: the Monad laws for `of` with `mergeMap` and with `concatMap`, and the Alt/Plus
+laws as `merge` with `EMPTY`. `chain` (= `mergeMap`) and `flatten` (= `mergeAll`) stay, as the
+building blocks of the do-notation.
 
-- **`ap` is derived from `chain`**, via `apFrom(chainF)` — so `Apply` and `Monad` cannot disagree, and
-  the ap/chain consistency law holds by construction rather than by luck. A `combineLatest`-based
-  apply is genuinely useful for UI state, but it is a *different* operation; it ships as `apLatest`
-  with no lawfulness claim attached.
-- **Error recovery is not `alt`.** `alt` must be associative with `EMPTY` as its identity; `catchError`
-  is neither of those things in the relevant sense, so it is exported under its own name, `orElse`.
+Two lessons from the earlier `rxjs-source-v7-fp` experiment survive as regression tests: an apply
+must agree with `chain` (a `combineLatest`-based one does not), and error recovery is not `merge`
+(`merge(EMPTY, fa) ≡ fa`, which a `catchError`-based "alt" broke).
 
 There is also a quiet piece of arity hygiene that would be easy to get wrong:
 
@@ -1065,12 +1062,12 @@ const _map = <A, B>(fa: Observable<A>, f: (a: A) => B): Observable<B> => map((a:
 observe the index — the classic `['1','2','3'].map(parseInt)` bug — and would break the Functor
 composition law. Every instance member therefore wraps its function to drop the extra argument.
 
-**The `MonadConcat` timing edge case**, stated precisely: in `chain(chain(m, f), g)` the `g`-inners
-of one `f(x)` can overlap the next `f(x)`; in `chain(m, x => chain(f(x), g))` they cannot. Both sides
-emit the same values in the same order, but not always at the same virtual frames, and an error can
-make that difference observable. `MonadMerge` has no such gap. The law test for `MonadConcat`
-therefore compares notification *sequences* on error-free streams, while `MonadMerge` is checked
-frame-for-frame.
+**The `concatMap` timing edge case**, stated precisely, with `chain` = `concatMap`: in
+`chain(chain(m, f), g)` the `g`-inners of one `f(x)` can overlap the next `f(x)`; in
+`chain(m, x => chain(f(x), g))` they cannot. Both sides emit the same values in the same order, but
+not always at the same virtual frames, and an error can make that difference observable. `mergeMap`
+has no such gap. The law test for `concatMap` therefore compares notification *sequences* on
+error-free streams, while `mergeMap` is checked frame-for-frame.
 
 `Option` and `Either` are tagged unions (`{ _tag: 'Some', value }` / `{ _tag: 'None' }`), discriminated
 by `_tag` rather than by class — the same technique as `FlattenStrategy`, applied to data instead of

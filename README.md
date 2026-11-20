@@ -171,25 +171,23 @@ The `step` function is pure, so you can unit- or property-test it with `runMachi
 ## Functional layer (`rxjs-fp/fp`)
 
 ```ts
-import { MonadMerge, MonadConcat, ObservablePlus, ObservableFilterable, getMergeMonoid,
-         Do, bind, let_, orElse, attempt, some, none, left, right } from 'rxjs-fp/fp';
+import { attempt, rethrow, Do, bind, let_, some, none, left, right, isRight,
+         ObservableFilterable, getMergeMonoid } from 'rxjs-fp/fp';
 ```
 
-These instances are lawful by construction, and `test/laws.test.ts` checks them with fast-check on generated timed streams:
+The functional layer keeps what reads naturally to an RxJS user: `Option` and `Either`, `attempt`/`rethrow` (errors as values), the do-notation (`Do`, `bindTo`, `bind`, `let_`), `chain` and `flatten`, and a few lawful instances. Monad, Applicative and Alternative instances (`MonadMerge`, `MonadConcat`, `ap`, `apLatest`, `alt`, `orElse`) are deliberately left out: an RxJS user writes `mergeMap`, `concatMap`, `combineLatest`, `merge` and `catchError` instead.
 
-| Instance | Definition | Laws checked |
-|---|---|---|
-| `MonadMerge` | `chain` = `mergeMap`, `ap` derived from `chain` | identity, associativity, ap/chain consistency. All hold **in time** (same notifications at the same virtual frames, up to the order of simultaneous events) |
-| `MonadConcat` | `chain` = `concatMap` | same laws, **up to timing** on error-free streams (edge case below) |
-| `ObservablePlus` / `ObservableAlternative` | `alt` = `merge`, `zero` = `EMPTY` | associativity, distributivity, left/right identity |
-| `getMergeMonoid`, `getConcatMonoid` | `merge` or `concat`, with `EMPTY` | associativity, identity |
-| `ObservableFilterable` | `filterMap` etc. | `filterMap(some) ≡ id`, filter fusion, partition |
+The laws are still checked, with fast-check on generated timed streams in `test/laws.test.ts`, and stated on the operators users write:
 
-Two deliberate choices:
-- **Error recovery is not `alt`.** `catchError` is exported as `orElse`.
-- **A `combineLatest`-based apply is not the Monad's `ap`.** It is exported as `apLatest` and makes no law claims.
+| Laws for | Laws checked |
+|---|---|
+| `of` with `mergeMap` | the Monad laws: left identity, right identity, associativity. All hold **in time** (same notifications at the same virtual frames, up to the order of simultaneous events) |
+| `of` with `concatMap` | the same laws, **up to timing** on error-free streams (edge case below) |
+| `merge` with `EMPTY` | associativity, `map` distributes over `merge`, left/right identity |
+| `getMergeMonoid`, `getConcatMonoid` | associativity, identity |
+| `ObservableFilterable` | `filterMap(some) ≡ id`, filter fusion, partition |
 
-**Edge case: `MonadConcat` associativity and time.** In `chain(chain(m, f), g)`, the `g`-inners of one `f(x)` can overlap the next `f(x)`. In `chain(m, x => chain(f(x), g))` they cannot. Both sides emit the same sequence, but not always at the same moments, and an error can make that difference visible. `MonadMerge` has no such gap.
+**Edge case: `concatMap` associativity and time.** Nesting `concatMap` two ways, the inner streams of the second step can overlap the next value's first step in one nesting but not in the other. Both sides emit the same sequence, but not always at the same moments, and an error can make that difference visible. `mergeMap` has no such gap.
 
 ## Marble testing
 

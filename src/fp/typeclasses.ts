@@ -23,38 +23,6 @@ export interface Functor<F extends URIS> {
   readonly map: <A, B>(fa: Kind<F, A>, f: (a: A) => B) => Kind<F, B>;
 }
 
-export interface Apply<F extends URIS> extends Functor<F> {
-  readonly ap: <A, B>(fab: Kind<F, (a: A) => B>, fa: Kind<F, A>) => Kind<F, B>;
-}
-
-export interface Applicative<F extends URIS> extends Apply<F> {
-  readonly of: <A>(a: A) => Kind<F, A>;
-}
-
-export interface Chain<F extends URIS> extends Apply<F> {
-  /** chain(chain(fa, f), g) ≡ chain(fa, a => chain(f(a), g)) */
-  readonly chain: <A, B>(fa: Kind<F, A>, f: (a: A) => Kind<F, B>) => Kind<F, B>;
-}
-
-/**
- * Monad laws: left identity chain(of(a), f) ≡ f(a), right identity
- * chain(fa, of) ≡ fa, plus Chain associativity. Consistency: `ap` must
- * equal the `ap` derived from `chain`.
- */
-export interface Monad<F extends URIS> extends Applicative<F>, Chain<F> {}
-
-export interface Alt<F extends URIS> extends Functor<F> {
-  /** associative; map distributes: map(alt(x, y), f) ≡ alt(map(x, f), map(y, f)) */
-  readonly alt: <A>(fx: Kind<F, A>, fy: () => Kind<F, A>) => Kind<F, A>;
-}
-
-export interface Plus<F extends URIS> extends Alt<F> {
-  /** alt(zero, fa) ≡ fa ≡ alt(fa, zero);  map(zero, f) ≡ zero */
-  readonly zero: <A>() => Kind<F, A>;
-}
-
-export interface Alternative<F extends URIS> extends Applicative<F>, Plus<F> {}
-
 export interface Separated<L, R> {
   readonly left: L;
   readonly right: R;
