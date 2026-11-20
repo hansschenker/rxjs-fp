@@ -175,6 +175,8 @@ import { attempt, rethrow, Do, bind, let_, some, none, left, right, isRight,
          ObservableFilterable, getMergeMonoid } from 'rxjs-fp/fp';
 ```
 
+[docs/fp-vocabulary.md](docs/fp-vocabulary.md) explains every name in this layer in RxJS terms.
+
 The functional layer keeps what reads naturally to an RxJS user: `Option` and `Either`, `attempt`/`rethrow` (errors as values), the do-notation (`Do`, `bindTo`, `bind`, `let_`), `chain` and `flatten`, and a few lawful instances. Monad, Applicative and Alternative instances (`MonadMerge`, `MonadConcat`, `ap`, `apLatest`, `alt`, `orElse`) are deliberately left out: an RxJS user writes `mergeMap`, `concatMap`, `combineLatest`, `merge` and `catchError` instead.
 
 The laws are still checked, with fast-check on generated timed streams in `test/laws.test.ts`, and stated on the operators users write:
