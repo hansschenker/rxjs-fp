@@ -20,7 +20,7 @@ import { Msg } from './msg.js';
 import { update } from './update.js';
 
 /**
- * The Elm loop, written as a stream equation:
+ * The Elm MVU loop, written as a stream equation with rxjs-fp:
  *
  *   intents ──map(update)──▶ reducer streams ──merge──▶ reducer$ ──scan(apply)──▶ model$ ──map(view)──▶ UI
  *      ▲                                                                              │
@@ -29,6 +29,9 @@ import { update } from './update.js';
  * Every intent stream is turned into a stream of *reducer functions*
  * (`Model -> Model`). The reducer streams are merged into one, and `scan`
  * folds them over the initial model. `scan` holds the only state of the app.
+ *
+ * This is the same discipline the library uses for operators: pure transitions
+ * (Mealy machines) plus a thin shell that runs them. Here the shell is `scan`.
  */
 
 /** INTENTS: what the user (or the outside world) wants, one typed stream each. */
@@ -83,6 +86,9 @@ export const reducers = (i: Intents): Observable<Reducer<Model>> =>
  * MODEL STREAM: fold the merged reducers with `scan`.
  * `startWith` gives subscribers the initial model; `shareLatest` makes
  * the one state machine shared by every view and effect.
+ *
+ * In day-to-day work this replaces the usual "Subject + BehaviorSubject"
+ * pattern: the model is produced, not mutated.
  */
 export const model$ = (i: Intents, initial: Model = initialModel): Observable<Model> =>
   reducers(i).pipe(
