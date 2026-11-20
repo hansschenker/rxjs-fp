@@ -21,7 +21,6 @@ import {
   distinctUntilChanged,
   emptyError,
   filter,
-  flow,
   flushError,
   flushWith,
   fromMachine,
@@ -96,11 +95,13 @@ const listToArray = <A>(list: List<A>): A[] => {
 };
 
 /** On completion, emits all values as one array. */
-export const toArray = <A>(): Operator<A, A[]> =>
-  flow(
-    reduce<A, List<A>>((tail, head) => ({ head, tail }), null),
-    map(listToArray),
-  );
+export const toArray =
+  <A>(): Operator<A, A[]> =>
+  (source) =>
+    source.pipe(
+      reduce<A, List<A>>((tail, head) => ({ head, tail }), null),
+      map(listToArray),
+    );
 
 // --- skipping ---------------------------------------------------------------
 
@@ -124,7 +125,7 @@ export function first<A, B extends A>(predicate: (value: A, index: number) => va
 export function first<A>(predicate: Predicate<A>): Operator<A, A>;
 export function first<A, D>(predicate: Predicate<A> | null | undefined, defaultValue: D): Operator<A, A | D>;
 export function first<A, D>(predicate?: Predicate<A> | null, defaultValue: D | typeof NO_DEFAULT = NO_DEFAULT): Operator<A, A | D> {
-  return flow(filter<A>(predicate ?? always), take<A>(1), orIfEmpty<A, D>(defaultValue, emptyError));
+  return (source) => source.pipe(filter<A>(predicate ?? always), take<A>(1), orIfEmpty<A, D>(defaultValue, emptyError));
 }
 
 /** The last value (passing `predicate`), on completion. Empty: `defaultValue`, or `EmptyError`. */
@@ -132,56 +133,66 @@ export function last<A>(): Operator<A, A>;
 export function last<A>(predicate: Predicate<A>): Operator<A, A>;
 export function last<A, D>(predicate: Predicate<A> | null | undefined, defaultValue: D): Operator<A, A | D>;
 export function last<A, D>(predicate?: Predicate<A> | null, defaultValue: D | typeof NO_DEFAULT = NO_DEFAULT): Operator<A, A | D> {
-  return flow(filter<A>(predicate ?? always), takeLast<A>(1), orIfEmpty<A, D>(defaultValue, emptyError));
+  return (source) => source.pipe(filter<A>(predicate ?? always), takeLast<A>(1), orIfEmpty<A, D>(defaultValue, emptyError));
 }
 
 /** The value at `index`. Too few values: `defaultValue`, or `ArgumentOutOfRangeError`. */
 export const elementAt = <A, D = A>(index: number, ...defaultValue: [] | [D]): Operator<A, A | D> => {
   if (index < 0) throw argumentOutOfRangeError();
-  return flow(
-    filter<A>((_, i) => i === index),
-    take<A>(1),
-    orIfEmpty<A, D>(defaultValue.length > 0 ? (defaultValue[0] as D) : NO_DEFAULT, argumentOutOfRangeError),
-  );
+  return (source) =>
+    source.pipe(
+      filter<A>((_, i) => i === index),
+      take<A>(1),
+      orIfEmpty<A, D>(defaultValue.length > 0 ? (defaultValue[0] as D) : NO_DEFAULT, argumentOutOfRangeError),
+    );
 };
 
 /** The first value passing `predicate`, or `undefined` if none does. */
 export function find<A, B extends A>(predicate: (value: A, index: number) => value is B): Operator<A, B | undefined>;
 export function find<A>(predicate: Predicate<A>): Operator<A, A | undefined>;
 export function find<A>(predicate: Predicate<A>): Operator<A, A | undefined> {
-  return flow(filter<A>(predicate), take<A>(1), defaultIfEmpty<A, undefined>(undefined));
+  return (source) => source.pipe(filter<A>(predicate), take<A>(1), defaultIfEmpty<A, undefined>(undefined));
 }
 
 /** The index of the first value passing `predicate`, or -1 if none does. */
-export const findIndex = <A>(predicate: Predicate<A>): Operator<A, number> =>
-  flow(
-    map<A, number>((a, i) => (predicate(a, i) ? i : -1)),
-    filter((i: number) => i >= 0),
-    take<number>(1),
-    defaultIfEmpty<number, number>(-1),
-  );
+export const findIndex =
+  <A>(predicate: Predicate<A>): Operator<A, number> =>
+  (source) =>
+    source.pipe(
+      map<A, number>((a, i) => (predicate(a, i) ? i : -1)),
+      filter((i: number) => i >= 0),
+      take<number>(1),
+      defaultIfEmpty<number, number>(-1),
+    );
 
 // --- yes/no answers ---------------------------------------------------------
 
 /** `false` as soon as a value fails `predicate`; `true` if the source completes first. */
-export const every = <A>(predicate: Predicate<A>): Operator<A, boolean> =>
-  flow(
-    filter<A>((a, i) => !predicate(a, i)),
-    take<A>(1),
-    as(false),
-    defaultIfEmpty<boolean, boolean>(true),
-  );
+export const every =
+  <A>(predicate: Predicate<A>): Operator<A, boolean> =>
+  (source) =>
+    source.pipe(
+      filter<A>((a, i) => !predicate(a, i)),
+      take<A>(1),
+      as(false),
+      defaultIfEmpty<boolean, boolean>(true),
+    );
 
 /** `false` as soon as a value arrives; `true` if the source completes first. */
-export const isEmpty = <A>(): Operator<A, boolean> => flow(take<A>(1), as(false), defaultIfEmpty<boolean, boolean>(true));
+export const isEmpty =
+  <A>(): Operator<A, boolean> =>
+  (source) =>
+    source.pipe(take<A>(1), as(false), defaultIfEmpty<boolean, boolean>(true));
 
 /** Maps each value to an `Option` and keeps the `some`s: `filter` and `map` in one step. */
-export const filterMap = <A, B>(f: (value: A, index: number) => Option<B>): Operator<A, B> =>
-  flow(
-    map(f),
-    filter((o: Option<B>) => isSome(o)),
-    map((o) => (o as { readonly value: B }).value),
-  );
+export const filterMap =
+  <A, B>(f: (value: A, index: number) => Option<B>): Operator<A, B> =>
+  (source) =>
+    source.pipe(
+      map(f),
+      filter((o: Option<B>) => isSome(o)),
+      map((o) => (o as { readonly value: B }).value),
+    );
 
 // --- machines: pure step and flush functions for fromMachine ----------------
 
