@@ -368,8 +368,10 @@ structural rather than about cost, and §17 sorts them.
 ## 6. Flattening: strategies as data, interpreted once
 
 `mergeMap`, `concatMap`, `switchMap` and `exhaustMap` differ in exactly one policy: what to do with a
-new outer value while inner Observables are running. In RxJS those are separate operator
-implementations over shared `mergeInternals` plumbing. Here the policy is a value:
+new outer value while inner Observables are running. In RxJS 7 the merge family shares one engine —
+`mergeMap`, `concatMap` (which is `mergeMap` at concurrency one), `mergeScan` and `expand` all go
+through `mergeInternals` — while `switchMap` and `exhaustMap` are separate implementations. Here the
+policy is a value:
 
 ```ts
 export type FlattenStrategy =
@@ -378,13 +380,15 @@ export type FlattenStrategy =
   | { readonly _tag: 'Exhaust' };
 
 export const Merge = (concurrent: number = Number.POSITIVE_INFINITY): FlattenStrategy =>
-  Object.freeze({ _tag: 'Merge', concurrent: Math.max(1, concurrent) });
+  Object.freeze({ _tag: 'Merge', concurrent: concurrency(concurrent) });
 export const Concat: FlattenStrategy = Merge(1);
 ```
 
 `Concat` is literally `Merge(1)` — the ordering guarantee is a consequence of a concurrency limit of
-one, and saying so in code is clearer than any comment. One interpreter, `flatMapWith`, reads the tag
-and handles an outer value:
+one, and saying so in code is clearer than any comment. The number is validated the way the 0.2.0
+policies are: a positive integer or `Infinity`, anything else throws `ArgumentOutOfRangeError` at
+construction — where RxJS clamps nothing and, handed `NaN`, queues every value forever. One
+interpreter, `flatMapWith`, reads the tag and handles an outer value:
 
 | Strategy | On an outer value |
 |---|---|
@@ -441,10 +445,16 @@ const scanWith =
 ```
 
 `mergeScan` is `scanWith(Merge(n))`, `switchScan` is `scanWith(Switch)`. Note the `defer`: the
+The strategy also decides whether `chain` is lawful. §12 offers `MonadMerge` (lawful in time) and
+`MonadConcat` (lawful up to timing) and nothing for `Switch` or `Exhaust`: those cancel or ignore
+values, and the two nestings in the associativity law place the cancel and ignore points differently,
+so no instance could pass `test/laws.test.ts`.
+
 accumulator's `let state` has to be created per subscription, and `defer` is what moves it inside
-the producer — the §2 cold-by-default rule applied deliberately rather than inherited. Had the
-concurrency policy been encoded as four separate operator classes, this reuse would have meant
-either duplicating the policy or inventing a shared base class for it.
+the producer — the §2 cold-by-default rule applied deliberately rather than inherited. RxJS 7 reuses by
+function too, but along two families — `mergeScan` over `mergeInternals`, `switchScan` over
+`switchMap` — so each new higher-order operator is written twice. One union with two interpreters is
+why `scanWith(Exhaust)` exists although nobody asked for it.
 
 ---
 

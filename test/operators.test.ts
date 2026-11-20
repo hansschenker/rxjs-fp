@@ -27,6 +27,8 @@ import {
   map,
   materialize,
   merge,
+  isArgumentOutOfRangeError,
+  Merge,
   mergeMap,
   of,
   pairwise,
@@ -196,6 +198,23 @@ describe('flattening strategies', () => {
 
   it('expand', () => {
     expect(collect(of(1).pipe(expand((x) => (x < 8 ? of(x * 2) : EMPTY))))).toEqual([1, 2, 4, 8, '|']);
+  });
+
+  it('rejects an invalid concurrency at construction, like the 0.2.0 policies', () => {
+    for (const bad of [0, -1, 1.5, Number.NaN, Number.NEGATIVE_INFINITY]) {
+      expect(() => Merge(bad)).toThrowError(/Expected/);
+      expect(() => mergeMap(() => EMPTY, bad)).toThrowError(/Expected/);
+      expect(() => expand(() => EMPTY, bad)).toThrowError(/Expected/);
+    }
+    expect(Merge()).toEqual({ _tag: 'Merge', concurrent: Number.POSITIVE_INFINITY });
+    expect(Merge(2)).toEqual({ _tag: 'Merge', concurrent: 2 });
+    let caught: unknown;
+    try {
+      Merge(0);
+    } catch (e) {
+      caught = e;
+    }
+    expect(isArgumentOutOfRangeError(caught)).toBe(true);
   });
 
   it('an error in the projection goes to error', () => {

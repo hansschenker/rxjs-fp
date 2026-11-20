@@ -2,6 +2,7 @@ import { observable, subscribeChild } from '../core/observable.js';
 import type { Operator, Subscription } from '../core/types.js';
 import { defer, from, type ObservableInput } from '../creation/creation.js';
 import { tap } from './transform.js';
+import { positiveInteger } from '../policies/core.js';
 
 /**
  * Flattening strategies as data.
@@ -20,8 +21,11 @@ export type FlattenStrategy =
   | { readonly _tag: 'Switch' }
   | { readonly _tag: 'Exhaust' };
 
+/** A concurrency limit: a positive integer, or `Infinity` for none. Anything else throws at construction. */
+const concurrency = (value: number): number => (value === Number.POSITIVE_INFINITY ? value : positiveInteger(value));
+
 export const Merge = (concurrent: number = Number.POSITIVE_INFINITY): FlattenStrategy =>
-  Object.freeze({ _tag: 'Merge', concurrent: Math.max(1, concurrent) });
+  Object.freeze({ _tag: 'Merge', concurrent: concurrency(concurrent) });
 export const Concat: FlattenStrategy = Merge(1);
 export const Switch: FlattenStrategy = Object.freeze({ _tag: 'Switch' });
 export const Exhaust: FlattenStrategy = Object.freeze({ _tag: 'Exhaust' });
@@ -102,11 +106,10 @@ export const flatMapWith =
  * Recursively projects every value: each emitted value is also fed back
  * into `project`. Emits all results; completes when nothing is left.
  */
-export const expand =
-  <A>(project: (value: A, index: number) => ObservableInput<A>, concurrent: number = Number.POSITIVE_INFINITY): Operator<A, A> =>
-  (source) =>
+export const expand = <A>(project: (value: A, index: number) => ObservableInput<A>, concurrent: number = Number.POSITIVE_INFINITY): Operator<A, A> => {
+  const limit = concurrency(concurrent);
+  return (source) =>
     observable<A>((sink) => {
-      const limit = Math.max(1, concurrent);
       const queue: A[] = [];
       let active = 0;
       let index = 0;
@@ -139,12 +142,8 @@ export const expand =
         },
       });
     });
+};
 
-/**
- * `scan` whose accumulator returns an Observable, flattened with `strategy`.
- * Every inner value is emitted and becomes the new accumulated state.
- * The state is per subscription (created in `defer`).
- */
 /**
  * `scan` whose accumulator returns an Observable, flattened with `strategy`;
  * each emitted state is the accumulator for the next value. The concurrency
