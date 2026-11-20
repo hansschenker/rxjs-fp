@@ -114,6 +114,11 @@ describe('Observable = a function you can cancel', () => {
     expect(viaFn).toEqual(viaMethod);
   });
 
+  it('keeps working when the pipe closure is detached from its record', () => {
+    const { pipe: detached } = range(1, 5); // a prototype method would lose its receiver here
+    expect(collect(detached(map((x) => x * 10)))).toEqual([10, 20, 30, 40, 50, '|']);
+  });
+
   it('flow builds a reusable operator with no source in sight', () => {
     const oddTimesTen = flow(filter((x: number) => x % 2 === 1), map((x: number) => x * 10));
     expect(collect(oddTimesTen(range(1, 5)))).toEqual([10, 30, 50, '|']);

@@ -31,13 +31,21 @@ time.
 | **Identity** — a thing you can `instanceof` | `isObservable`, `instanceof Subscriber`, error discrimination | A symbol brand (`OBSERVABLE_BRAND`) and duck-typed guards; errors are tagged by `name` |
 | **Encapsulated mutable state** — private fields | A subscription's `closed` flag, an operator's accumulator | One `let` captured by a closure, created *inside* the producer, so it exists once per subscription and is unreachable from outside |
 | **Method sharing** — one `prototype`, many instances | `Observable.prototype.pipe`, `Subscriber.prototype.next` | Module-level functions that take their subject as an argument (`pipe(src, f)`), plus a small frozen record of closures per value |
-| **Subtype polymorphism** — `MergeMapSubscriber extends Subscriber` | Per-operator behaviour | A tagged union of *data* plus one interpreter function (`FlattenStrategy` + `flatMapWith`) |
+| **Subtype polymorphism** — `MergeMapSubscriber extends Subscriber` | Per-operator behaviour | A tagged union of *data* plus one interpreter function: `FlattenStrategy` + `flatMapWith` (§6), and since 0.2.0 the `RepeatPolicy`, `RetryPolicy`, `SharePolicy`, `ThrottleMode` and `TimeoutPolicy` sums and products of [Algebraic operator policies](algebraic-policies.md) |
 | **Open recursion** — `this.method()` resolved late | `lift`, template-method operators, `BehaviorSubject` overriding `_subscribe` | Explicit parameter passing: the behaviour is a function you were handed (`step`, `project`, `scheduler`, `hooks.onSubscribe`) |
 
 Only the second row is irreducible. Streams are stateful; `scan` must remember its accumulator
 somewhere. The design question is never "can we eliminate state" but **"how small and how visible
 can we make the place it lives?"** This library's answer: one mutable cell per subscription, created
 by the producer, named at the top of the function that uses it.
+
+Rows four and five are available in plain functions, but they are not free. A class hierarchy and a
+tagged union are the two sides of the expression problem: subclasses let anyone add a *variant* from
+outside the library and make adding an *operation* across every variant expensive; a union plus one
+interpreter is exactly the reverse. A fourth flattening strategy means editing `flatMapWith`, and a
+subject can only be customised through the hooks `makeSubject` chooses to expose. This library takes
+the closed side deliberately — the set of strategies is fixed by RxJS itself, and an exhaustive
+`switch` is what lets an interpreter be tested on its own — and §16 lists it among the costs.
 
 ---
 
@@ -72,17 +80,30 @@ refers to itself without `this`. The `pipe` closure captures `self` lexically, s
 `pipe(obs, f)` are the same computation — and detaching the method (`const p = obs.pipe`) cannot
 break it, which is not true of a prototype method that depends on its receiver.
 
-Three consequences fall out for free, each of which RxJS has to arrange deliberately:
+The function in Taylor's sentence is not this record but `Producer<A>` in `src/core/types.ts:52` — a
+sink in, a teardown out. `observable` is the wrapper that makes calling that function safe: the elided
+body of `subscribe` links the new execution to its downstream scope *before* the producer runs, hands
+the producer a sink that enforces the grammar `next* (error | complete)?`, skips the producer when
+downstream is already closed, and routes a throwing producer into `error`. §3 is that body.
+
+Three consequences fall out for free. RxJS shares the first; the other two it has to arrange
+deliberately:
 
 1. **Cold by default.** `subscribe` calls `producer(sink)`. Two subscriptions call it twice, with two
    separate sinks and two separate sets of captured `let`s. Sharing is therefore impossible by
-   accident; you must ask for it with a Subject or `share`.
+   accident; you must ask for it with a Subject or `share`. RxJS is cold the same way:
+   `new Observable(fn)` stores `fn` and `subscribe` calls it. What differs is that hotness cannot
+   arrive by inheritance: there is no `Subject extends Observable` here, a subject is a separate
+   record from `makeSubject` (§10) that merely satisfies the interface.
 2. **No inheritance surface.** There is no `Observable` base class for an operator to extend, so
    there is nothing to override, and no `lift` needed to preserve a subclass through an operator
    chain. An operator is a function `Observable<A> → Observable<B>`; it builds a *new* Observable
    around the old one.
-3. **Nothing to construct.** `of(1, 2)` is a function call, not `new Of(...)`. Tree-shaking works on
-   function exports in a way it cannot work on a class with many prototype methods.
+3. **Nothing to construct.** `of(1, 2)` is a function call, not `new Of(...)`. The tree-shaking
+   advantage this used to imply belongs to RxJS 5, whose prototype-patched operators
+   (`rxjs/add/operator/map`) could not be shaken; RxJS 6 moved operators to plain functions for
+   exactly that reason. What makes this package shakeable is what makes RxJS 7 shakeable too:
+   `"sideEffects": false` in `package.json`, a flag a class-based library can set just as well.
 
 ---
 
@@ -102,12 +123,15 @@ export const createSubscription = (initial?: Teardown): Subscription => {
 };
 ```
 
-This is RxJS 5's "flattened disposable tree" without the tree or the class. Points worth noticing:
+This is RxJS 5's "flattened disposable tree" without the class — and without the back-pointers, not
+without the tree: a child still registers its own `unsubscribe` in its parent's set, so nested
+executions remain a tree, but no child knows its parent (RxJS 7 keeps `_parentage` for that). Each
+node is flat; the structure across nodes is not. Points worth noticing:
 
 - **`closed` is exposed as a getter**, not a copied boolean, so the frozen record still reports live
   state. Freezing the record does not freeze the closure variables behind it — which is precisely
   the encapsulation a class gives you with `#private`, achieved with scope instead.
-- **`add` returns its own un-adder** (`src/core/subscription.ts:54-62`). That one return value is
+- **`add` returns its own un-adder** (`src/core/subscription.ts:54-63`). That one return value is
   what keeps a long-lived parent from accumulating dead children: an operator that finishes early
   calls the returned function and removes itself. In RxJS this is `Subscription.prototype.remove`,
   which needs the child's identity to find it; here the closure *is* the handle.
@@ -115,7 +139,7 @@ This is RxJS 5's "flattened disposable tree" without the tree or the class. Poin
   `if (closed) return` guard.
 - **Errors during teardown are aggregated**, not swallowed: failures from individual finalizers are
   collected and rethrown as a single `UnsubscriptionError`, flattening nested ones
-  (`src/core/subscription.ts:36-51`).
+  (`src/core/subscription.ts:36-52`).
 
 ### 3.2 The sink: the Observable grammar, enforced in one place
 
@@ -124,7 +148,8 @@ that knows the protocol `next* (error | complete)?`:
 
 - nothing is delivered after a terminal notification or after `unsubscribe` (`stopped || subscription.closed`);
 - a terminal notification tears the execution down in a `finally`, so teardown runs even if the
-  consumer's handler throws;
+  handler throws — which only an internal sink lets happen; a consumer's handler is already caught
+  by `guard`;
 - `closed` is again a getter over `stopped || subscription.closed`.
 
 The subtle part is the `internal` flag. For an operator-to-operator sink, exceptions from handlers
@@ -137,9 +162,14 @@ export const reportUnhandledError = (err: unknown): void => {
 };
 ```
 
-That is design rule 6 — *errors never escape the pipeline* — reduced to five lines. A consumer
-callback that throws becomes an uncaught error at the top level, where your monitoring sees it; it
-never re-enters the pipeline and never corrupts an in-flight emission.
+That is design rule 6 — *error routes are explicit* — reduced to five lines. A consumer callback
+that throws becomes an uncaught error at the top level, where your monitoring sees it; it never
+re-enters the pipeline and never corrupts an in-flight emission. Two routes leave a *running*
+pipeline on purpose, and the README's rule names both: a shared connection's reset signal that
+errors is handed to this same reporter (the 0.2.0 `SharePolicy` resets in `src/subject/subject.ts`),
+and finalizers that throw surface from `unsubscribe()` as the `UnsubscriptionError` of §3.1. RxJS 7
+consults a `config.onUnhandledError` hook before throwing; there is no such hook here — the fresh
+task is the only route.
 
 ### 3.3 `subscribeChild` and the `PARENT` symbol
 
@@ -168,17 +198,23 @@ downstream. The ordering is
    (`if (sink.closed) return`) fires and the loop exits.
 
 Without step 1 happening before step 2, the infinite loop would never learn that anyone had stopped
-listening. RxJS gets this by constructing the `Subscriber` first and passing it down; rxjs-fp gets it
-by passing a scope through a symbol-keyed property. `subscribeChild` also wraps every handler so a
-throwing user function (a `project`, a `predicate`) is routed to `sink.error`, and its overloads
-forbid forwarding upstream values to a sink of a different type without an explicit `next`.
+listening. RxJS gets this by constructing the `Subscriber` first and passing it down — concretely,
+the `Subscriber` constructor calls `destination.add(this)` before any `_subscribe` runs
+(`src/internal/Subscriber.ts:54` in RxJS 7.8.2); rxjs-fp gets it by passing a scope through a
+symbol-keyed property. `subscribeChild` also wraps every handler so a throwing user function (a
+`project`, a `predicate`) is routed to `sink.error`, and its overloads forbid forwarding upstream
+values to a sink of a different type without an explicit `next`.
 
 Two sibling functions complete the set, and between them they are the only ways anything in the
 library attaches to an upstream:
 
 - **`subscribeWithin(source, scope, observer)`** links against an arbitrary scope rather than a
   downstream sink, for cases where the upstream must outlive the subscriber that started it.
-  `share` (§10) and `groupBy` (§7.4) need it.
+  `share` (§10) and `groupBy` (§7.4) need it. Unlike `subscribeChild` it does *not* wrap the
+  handlers: there is no sink to route an exception to, so the caller owns that — `groupBy` with its
+  own `try`, `share` through `reportCallbackError`. A handler that throws anyway propagates into
+  the upstream's internal sink, where the nearest operator's routing catches it; against a bare
+  asynchronous source it would surface on that source's task.
 - **`subscribeInner(input, sink, handlers)`** (`src/operators/inner.ts`) is for *duration* inners —
   the notifier of a `buffer`, the duration selector of a `debounce`, the closing Observable of a
   `windowWhen`. It hands each handler a frozen `Inner` handle with `closed` and `close()`, and the
@@ -409,6 +445,11 @@ applications of `flatMapWith`, and `mergeAll`/`concatAll`/`switchAll`/`exhaustAl
 to the identity projection. Eight operators from one interpreter and three data constructors — and
 as §7.1 shows, `merge` and `concat` come out of the same interpreter too.
 
+The strategy also decides whether `chain` is lawful. §12 offers `MonadMerge` (lawful in time) and
+`MonadConcat` (lawful up to timing) and nothing for `Switch` or `Exhaust`: those cancel or ignore
+values, and the two nestings in the associativity law place the cancel and ignore points differently,
+so no instance could pass `test/laws.test.ts`.
+
 The one genuinely hard case is `Switch` under re-entrancy, and it is worth reading closely
 (`src/operators/flatten.ts:44-70`). A `generation` counter is bumped per inner, and each inner's
 handlers consult `isCurrent()` before speaking:
@@ -445,11 +486,6 @@ const scanWith =
 ```
 
 `mergeScan` is `scanWith(Merge(n))`, `switchScan` is `scanWith(Switch)`. Note the `defer`: the
-The strategy also decides whether `chain` is lawful. §12 offers `MonadMerge` (lawful in time) and
-`MonadConcat` (lawful up to timing) and nothing for `Switch` or `Exhaust`: those cancel or ignore
-values, and the two nestings in the associativity law place the cancel and ignore points differently,
-so no instance could pass `test/laws.test.ts`.
-
 accumulator's `let state` has to be created per subscription, and `defer` is what moves it inside
 the producer — the §2 cold-by-default rule applied deliberately rather than inherited. RxJS 7 reuses by
 function too, but along two families — `mergeScan` over `mergeInternals`, `switchScan` over
@@ -491,65 +527,95 @@ plus TypeScript 5's `const` type parameter — `<const T extends readonly Observ
 preserves the tuple literal type at the call site without making callers write `as const`. No classes
 are involved in precise variadic typing; mapped and conditional types do all of it.
 
-The multi-source operators share one helper, `runAll`, which subscribes to each source in turn while
-re-checking `sink.closed`, and returns a teardown that unsubscribes all of them. Their state is a
-pair of parallel arrays (`values`, `has`) plus counters (`ready`, `completed`) — per subscription, in
-the producer, exactly as §13 inventories.
+The producers in that file — `combineLatest`, `zip`, `race` and `withLatestFrom` — share one helper,
+`runAll`, which subscribes to each source in turn while re-checking `sink.closed`, and returns a
+teardown that unsubscribes all of them. Their state is a pair of parallel arrays (`values`, `has`)
+plus counters (`ready`, `completed`) — per subscription, in the producer, exactly as §13 inventories.
+`forkJoin` is not among them: it is vocabulary, `combineLatest` over each source's `takeLast(1)`
+(`src/vocabulary/combination.ts`), and inherits the tuple typing for free.
 
-### 7.2 Time: one scheduler argument, one cancel handle
+### 7.2 Time: one scheduler argument, and the clock is an Observable
 
-Every time-based operator takes the scheduler as a defaulted parameter:
+Every time-based operator takes the scheduler as a defaulted last parameter:
 
 ```ts
-export const debounceTime =
-  <A>(ms: number, scheduler: Scheduler = asyncScheduler): Operator<A, A> => /* … */
+export const debounceTime = <A>(ms: number, scheduler: Scheduler = asyncScheduler): Operator<A, A> =>
+  debounce<A>(() => timer(ms, undefined, scheduler));
 ```
 
-The pattern inside is always the same: a `let cancel` holding the current scheduled action, replaced
-when the window restarts, and cancelled from the producer's teardown. `debounceTime` restarts on each
-value; `throttleTime` opens a window and refuses values inside it; `auditTime` emits the pending
-value at the end of the window, including on completion; `delay` keeps a `Set` of pending timers so
-completion can wait for the last one. Because the scheduler is a parameter and not a global, each of
-these is deterministic under a virtual clock — see §8 and §15.
+That line is the whole of `debounceTime` (`src/vocabulary/time.ts`), and it states the relationship
+between the two time families exactly. The notifier-driven operators — `debounce`, `throttle`,
+`audit`, `sample` — are the kernel producers (`src/operators/time.ts`); the millisecond versions are
+*the same operator with a timer as the clock*. `throttleTime`, `auditTime` and `sampleTime` are the
+same one-liner over their primitive. `delay` is `mergeMap` over a projection that emits the value
+`ms` later, so the bookkeeping a hand-written `delay` would keep — a set of pending timers, so that
+completion can wait for the last one — is the flatten interpreter's `active` counter (§6); `delayWhen`
+is the same `mergeMap` with the duration taken from a selector. `timestamp` and `timeInterval` are
+the degenerate cases: they only read `scheduler.now()`, through `map` and `scan`, and never schedule
+anything.
 
-Each of these has a **notifier-driven sibling** where the duration is an Observable rather than a
-number — `debounce`, `throttle`, `audit`, `sample`, `delayWhen` — and those are where
-`subscribeInner` (§3.3) earns its place: the duration is an inner whose own completion ends the
-window, and it may do so synchronously, before the subscription that started it has been assigned.
-The shape is otherwise identical, with an `Inner` handle in place of a `cancel` closure, which is a
-fair summary of the relationship between the two families: *the same operator with a different
-clock*. `timestamp` and `timeInterval` are the degenerate cases — they only read `scheduler.now()`
-and never schedule anything.
+Inside the kernel producers the duration or notifier is an inner Observable, and that is where
+`subscribeInner` (§3.3) earns its place: a duration may end synchronously, before the subscription
+that started it has been assigned, and the `Inner` handle is how an operator closes a window it
+cannot yet name. The pattern this section used to describe — a `let cancel` holding the current
+scheduled action, replaced when the window restarts and cancelled from the teardown — survives in
+exactly one operator, `timeout` (`src/operators/time.ts:158`), whose deadline really is a scheduled
+action rather than a notifier, and in `subscribeOn`/`observeOn`, which exist only to schedule.
+Because the scheduler is a parameter and not a global, every one of these is deterministic under a
+virtual clock — see §8 and §15.
 
 ### 7.3 Resubscription: `catchError`, `retry`, `repeat` as named recursion
 
 This is the subtlest category, because re-subscribing is where a class-based design leans hardest on
 having an object to re-run `lift` against. The functional answer is a locally named function that
-calls itself:
+calls itself — here `retry` (`src/operators/error.ts:163`), abridged to the `immediate` delay:
 
 ```ts
-const subscribe = (): void => {
-  current = subscribeChild(source, sink, {
-    next: (a) => { if (resetOnValue) attempt = 0; sink.next(a); },
-    error: (err) => {
-      attempt++;
-      const decision = policy(err, attempt);
-      if (decision._tag === 'GiveUp') { sink.error(err); return; }
-      current?.unsubscribe();
-      if (decision._tag === 'RetryNow') subscribe();
-      else cancelDelay = scheduler.schedule(subscribe, decision.ms);
-    },
-  });
-};
-subscribe();
-return () => { cancelDelay?.(); current?.unsubscribe(); };
+return (source) => observable<A>((sink) => {
+  let retries = 0;
+  let current: Subscription | null = null;
+
+  const restart = (error: unknown): void => {
+    current?.unsubscribe();
+    current = null;
+    if (sink.closed) return;
+    /* immediate → connectSource(); after / on-signal → waitForRestart(signal, sink, connectSource) */
+  };
+
+  const connectSource = (): void => {
+    if (sink.closed) return;
+    let failedSynchronously = false;
+    let synchronousError: unknown;
+    current = subscribeChild(source, sink, {
+      next: (value) => { if (reset) retries = 0; sink.next(value); },
+      error: (error) => {
+        if (retries >= count) { sink.error(error); return; }
+        retries += 1;
+        if (current) restart(error);
+        else { failedSynchronously = true; synchronousError = error; }
+      },
+    });
+    if (failedSynchronously) restart(synchronousError);
+  };
+
+  connectSource();
+});
 ```
 
-`subscribe` is the recursion; `attempt`, `current` and `cancelDelay` are the per-subscription cells;
-and the returned teardown cancels whichever of the two is live. `repeat` is the same shape on
-`complete` instead of `error`. Note that the downstream `sink` is *reused* across attempts — only the
-upstream subscription is replaced — which is why a retry does not re-deliver anything to the consumer
-and why the grammar enforcement of §3.2 is not disturbed.
+`connectSource` and `restart` are the recursion; `retries` and `current` are the per-subscription
+cells. Two things are worth noticing. The producer returns *no teardown*: the live source subscription
+is linked to `sink` by `subscribeChild` (§3.3), and a wait between attempts — `waitForRestart`
+subscribes the delay timer or the policy's signal — runs in a scope registered on the sink with
+`sink.add`, so unsubscribing downstream cancels whichever of the two is live without the operator
+holding a handle to either. And the `failedSynchronously` latch is the third appearance of the hazard
+§3.3 and §6 already met: a synchronous source can error *inside* `subscribeChild`, before `current`
+has been assigned, so the handler cannot unsubscribe it yet and leaves a note for the line after the
+call. `repeat` (`src/operators/error.ts:258`) is the same shape on `complete` instead of `error`,
+latch included. Note that the downstream `sink` is *reused* across attempts — only the upstream
+subscription is replaced — which is why a retry does not re-deliver anything to the consumer and why
+the grammar enforcement of §3.2 is not disturbed. The 0.1.0 decision policy
+(`retryNow | retryAfter(ms) | giveUp`) is still available as `retryWith`, which turns each decision
+into a signal Observable for this same `retry`.
 
 `catchError` needs one extra trick, because RxJS's handler signature receives `caught` — the
 resulting Observable, so that returning it restarts the source with the error handling still in
@@ -1157,6 +1223,7 @@ streams, at a run count controlled by the `LAW_RUNS` environment variable (CI se
 | **Debuggability** | A stack frame reads `next` or an anonymous arrow rather than `MergeMapSubscriber.prototype._next`. The upside is that `runMachine` lets you debug operator *logic* without a stack at all. |
 | **Type-inference ceiling** | `pipe` and `flow` are typed by overloads, so the tenth step onward (the ninth for `flow`) degrades to `unknown` — exactly RxJS's limitation, from the same cause. |
 | **No `instanceof` for users** | Consumers must use the exported guards (`isObservable`, `isEmptyError`, …) instead of `instanceof`. Across realms this is an improvement; as an API habit it is a difference to document. |
+| **Variants are closed** | A tagged union is consumed by one exhaustive `switch`, so a new alternative — a fourth `FlattenStrategy`, another `RepeatLimit` — means editing the interpreter in this repository; a consumer cannot subclass their way in. In the policy interpreters, `assertNever` from `src/policies/core.ts` turns a missed branch into a compile error, which is the point: open extension is traded for exhaustiveness, and §1 says why. |
 | **Hooks are less discoverable than overrides** | `makeSubject({ onNext, onSubscribe })` is more compact than three subclasses, but a reader looking for "what does ReplaySubject change?" has to read two closures rather than one class body. |
 
 ---
