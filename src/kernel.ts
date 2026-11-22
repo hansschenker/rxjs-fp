@@ -34,7 +34,8 @@ export { bindCallback, bindNodeCallback } from './creation/bind.js';
 // Value-based
 export { map, scan, reduce, tap } from './operators/transform.js';
 export { filter, take, takeLast, takeWhile, skipWhile, distinct, distinctUntilChanged } from './operators/filtering.js';
-export { defaultIfEmpty, materialize, dematerialize } from './operators/transform.js';
+export { defaultIfEmpty } from './operators/transform.js';
+export { nextNotification, errorNotification, COMPLETE_NOTIFICATION } from './operators/transform.js';
 export type { Notification } from './operators/transform.js';
 export { throwIfEmpty } from './operators/conditional.js';
 

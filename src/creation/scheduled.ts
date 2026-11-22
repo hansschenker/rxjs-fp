@@ -1,8 +1,10 @@
 import { observable } from '../core/observable.js';
 import type { Observable, Teardown } from '../core/types.js';
 import type { Scheduler } from '../scheduler/scheduler.js';
-import { flatMapWith, Merge } from '../operators/flatten.js';
-import { dematerialize, map, materialize } from '../operators/transform.js';
+import { catchError } from '../operators/error.js';
+import { takeWhile } from '../operators/filtering.js';
+import { Concat, flatMapWith, Merge } from '../operators/flatten.js';
+import { COMPLETE_NOTIFICATION, errorNotification, map, nextNotification, type Notification } from '../operators/transform.js';
 import { from, timer, type ObservableInput } from './creation.js';
 
 const isIterable = (x: unknown): x is Iterable<unknown> =>
@@ -44,19 +46,26 @@ const scheduleIterable = <A>(iterable: Iterable<A>, scheduler: Scheduler): Obser
 /**
  * `subscribeOn(scheduler)` then `observeOn(scheduler)`, spelled with kernel
  * operators because the kernel may not import the vocabulary. The public
- * definitions are in src/vocabulary/time.ts: a timer flattened into the
- * source, then `delay(0)` applied to the notifications.
+ * definitions are in src/vocabulary/time.ts and values.ts: a timer flattened
+ * into the source; then every notification as a value (`materialize`), one
+ * task later (`delay`), and back into its channel (`dematerialize`).
  */
 const onScheduler =
   <A>(scheduler: Scheduler) =>
   (source: Observable<A>): Observable<A> => {
     const later = <B>(value: B): Observable<B> => timer(0, undefined, scheduler).pipe(map(() => value));
     const mergeMap = flatMapWith(Merge());
-    return later(source).pipe(
-      mergeMap((s: Observable<A>) => s),
-      materialize<A>(),
+    const subscribed = later(source).pipe(mergeMap((s: Observable<A>) => s));
+    const asValues = from([subscribed.pipe(map(nextNotification)), from([COMPLETE_NOTIFICATION as Notification<A>])]).pipe(
+      flatMapWith(Concat)((part: Observable<Notification<A>>) => part),
+      catchError((error): Observable<Notification<A>> => from([errorNotification(error)])),
+    );
+    return asValues.pipe(
       mergeMap(later),
-      dematerialize<A>(),
+      takeWhile((n: Notification<A>) => n.kind !== 'C'),
+      mergeMap((n: Notification<A>): Observable<A> =>
+        n.kind === 'N' ? from([n.value]) : observable<never>((sink) => sink.error((n as { readonly error: unknown }).error)),
+      ),
     );
   };
 

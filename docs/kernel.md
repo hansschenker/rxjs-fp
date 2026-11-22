@@ -79,13 +79,12 @@ the producer keeps nothing (rule 4 of the identity test below).
 | `reduce` | accumulates, emitting the final state | `count`, `toArray` |
 | `take` | the first `n` values, completing with the `n`th | `first`, `elementAt`, `find`, `findIndex`, `every`, `isEmpty` |
 | `takeLast` | the last `n` values, on completion | `last`, `forkJoin` |
-| `takeWhile` | values while a test holds, completing when it fails | `takeUntil`, `skipUntil` |
+| `takeWhile` | values while a test holds, completing when it fails | `takeUntil`, `skipUntil`, `dematerialize` |
 | `skipWhile` | drops values while a test holds | `skip` |
 | `distinct(key?)` | drops values seen before | |
 | `distinctUntilChanged` | drops a value equal to the previous one | `distinctUntilKeyChanged` |
 | `defaultIfEmpty` | a fallback value if the source completes empty | `first`, `last`, `elementAt` with a default; `find`, `findIndex`, `every`, `isEmpty` |
 | `throwIfEmpty` | an error if the source completes empty | `first`, `last`, `elementAt` without a default; `throwError` |
-| `materialize`, `dematerialize` | notifications as values, and back | `observeOn` |
 | `groupBy`, `groupByUntil` (named core) | one inner Observable per key | |
 
 `first`, `elementAt`, `find`, `findIndex`, `every` and `isEmpty` are one sentence with three choices:
@@ -94,6 +93,12 @@ pick the value with `filter` and `take(1)`, then say what an empty stream means 
 
 `take` and `takeWhile` stay separate: `take(n)` completes with its `n`th value, while
 `takeWhile((_, i) => i < n)` completes only when the next value arrives and fails the test.
+
+`materialize` and `dematerialize` are vocabulary: the three channels become one and back.
+`materialize` is `map` to `N`, `concat` with one `C`, and `catchError` to one `E`; `dematerialize`
+is `takeWhile` (not `C`), then `mergeMap` into `of` for an `N` and `throwError` for an `E`. The
+notification helpers (`nextNotification`, `errorNotification`, `COMPLETE_NOTIFICATION`) stay with
+the kernel's types. `observeOn` is built on the pair.
 
 ### Time-based
 
@@ -196,7 +201,7 @@ definition answers `false` as soon as a value is paired with the other side's en
 
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
-| `catchError` | replaces an error with another Observable | `catchTimeout`, `onErrorReturn`, `onErrorResumeNext` |
+| `catchError` | replaces an error with another Observable | `catchTimeout`, `onErrorReturn`, `onErrorResumeNext`, `materialize` |
 | `retry(policy, scheduler)` | restarts after errors according to additional-retry limit, wait and counter choices | `retryWith`, `retryConsecutiveWith`; decision functions `times`, `timesWithDelay`, `exponentialBackoff` |
 | `repeat(policy, scheduler)` | restarts after completion according to total-run limit and wait choice | |
 | `finalize` | runs a function on teardown | |
@@ -235,8 +240,9 @@ a current export count. A smaller kernel is still a goal. Further reductions eac
 - **Combination** — done for two of the three. `withLatestFrom` is a tagged `merge` into a machine
   and `sequenceEqual` is `zip` of the ended sequences, then `every`; two base operators went.
   `race` stays: the losers must be unsubscribed at the first notification.
-- **Notifications.** `materialize` and `dematerialize` could count as one primitive pair beside
-  `fromMachine`.
+- **Notifications** — done, and not as a primitive pair: `materialize` is `map`, `concat` with one
+  `C` and `catchError` to one `E`; `dematerialize` is `takeWhile`, then `mergeMap` into `of` or
+  `throwError`. Two base operators went; the primitives stay `observable` and `fromMachine`.
 
 A larger reduction needs the postponed step below: time and coordination as pure machines,
 where one interpreter replaces most of the native time code. Merely renaming public exports
@@ -276,7 +282,7 @@ Rules that keep the layering intact:
 | `rxjs-fp/kernel` | `src/kernel.ts` | done: re-exports the kernel plus the types and helpers vocabulary needs |
 | `rxjs-fp/concurrency` | `src/vocabulary/concurrency.ts` | done: `mergeMap`, `concatMap`, `switchMap`, `exhaustMap`, the four `…All`, `merge`, `concat`, `mergeWith`, `concatWith` |
 | `rxjs-fp/time` | `src/vocabulary/time.ts` | done: `delay`, `emitAfter`, `debounceTime`, `throttleTime` and its variants, `throttleTimeWith`, `auditTime`, `sampleTime`, `windowCount`, `windowTime`, `windowTimeEvery`, `windowTimeOrCount`, `windowTimeEveryOrCount`, `observeOn`, `subscribeOn` |
-| `rxjs-fp/values` | `src/vocabulary/values.ts` | done: `as`, `withIndex`, `skip`, `ignoreElements`, `count`, `toArray`, `first`, `last`, `elementAt`, `find`, `findIndex`, `every`, `isEmpty`, `distinctUntilKeyChanged` |
+| `rxjs-fp/values` | `src/vocabulary/values.ts` | done: `as`, `withIndex`, `skip`, `ignoreElements`, `count`, `toArray`, `first`, `last`, `elementAt`, `find`, `findIndex`, `every`, `isEmpty`, `distinctUntilKeyChanged`, `materialize`, `dematerialize` |
 | `rxjs-fp/creation` | `src/vocabulary/creation.ts` | done: `of`, `EMPTY`, `throwError`, `range`, `interval`, `iif` |
 | `rxjs-fp/combination` | `src/vocabulary/combination.ts` | done: `takeUntil`, `skipUntil`, `withLatestFrom`, `sequenceEqual`, `forkJoin`, `startWith`, `endWith`, `onErrorResumeNext`, `combineLatestWith`, `zipWith`, `raceWith`, `onErrorResumeNextWith`, `combineLatestAll`, `zipAll`, `partition` |
 | `rxjs-fp/errors` | `src/vocabulary/errors.ts` | done: `retry`, `times`, `timesWithDelay`, `exponentialBackoff`, `catchTimeout`, `onErrorReturn` |
@@ -287,8 +293,8 @@ Rules that keep the layering intact:
 reaches the vocabulary (checked transitively), and the root exports the same functions as the
 family modules. Kernel files that used a vocabulary operator internally (`delayWhen`,
 `combineLatestAll`, `zipAll`, `startWith`, `endWith`) now call `flatMapWith` directly, and
-`scheduled` spells `subscribeOn` and `observeOn` with `timer`, `flatMapWith`, `materialize` and
-`dematerialize`.
+`scheduled` spells `subscribeOn` and `observeOn` with `timer`, `flatMapWith`, `map`, `takeWhile`,
+`catchError` and the notification helpers.
 
 ## The identity test
 
@@ -350,6 +356,8 @@ Results so far:
 | `withLatestFrom` | `merge` of the tagged others and the ended source, into a `fromMachine` machine | identical, including synchronous others, which are subscribed before the source |
 | `sequenceEqual` | `zip` of both ended sequences, then `every` | identical on sequences of equal length, and the specification (the value sequences are equal) on all diagrams; on different lengths rxjs-fp answers `false` where RxJS 7.8.2 can answer `true` (deliberate, README) |
 | `race` | `merge` with the winner selected | differs: the losers stay subscribed, and every input is subscribed even after a synchronous winner. Stays in the kernel |
+| `materialize` | `map` to `N`, `concat` with one `C`, `catchError` to one `E` | identical |
+| `dematerialize` | `takeWhile` (not `C`), then `mergeMap` into `of` or `throwError` | identical, including a `C` in the middle of a stream and a stream with no terminal |
 
 ## The naming style for pipelines
 

@@ -1,6 +1,6 @@
 import { observable, subscribeChild } from '../core/observable.js';
 import { cont, flushWith, fromMachine } from '../core/machine.js';
-import type { Observable, Observer, Operator } from '../core/types.js';
+import type { Observer, Operator } from '../core/types.js';
 
 /**
  * Transformation operators.
@@ -67,7 +67,9 @@ export const tap =
     });
 
 // ---------------------------------------------------------------------------
-// Notifications as data: materialize / dematerialize
+// Notifications as data. The operators are vocabulary (src/vocabulary/values.ts):
+// materialize is map, concat with one C and catchError to one E; dematerialize
+// is takeWhile, then mergeMap into of or throwError.
 // ---------------------------------------------------------------------------
 
 export type Notification<A> =
@@ -92,31 +94,4 @@ export const observeNotification = <A>(n: Notification<A>, o: Partial<Observer<A
       o.complete?.();
   }
 };
-
-/** Turns every notification (including terminal ones) into a value. */
-export const materialize =
-  <A>(): Operator<A, Notification<A>> =>
-  (source) =>
-    observable((sink) =>
-      subscribeChild(source, sink, {
-        next: (a) => sink.next(nextNotification(a)),
-        error: (e) => {
-          sink.next(errorNotification(e));
-          sink.complete();
-        },
-        complete: () => {
-          sink.next(COMPLETE_NOTIFICATION);
-          sink.complete();
-        },
-      }),
-    );
-
-/** The inverse of `materialize`. */
-export const dematerialize = <A>(): Operator<Notification<A>, A> =>
-  (source: Observable<Notification<A>>) =>
-    observable<A>((sink) =>
-      subscribeChild(source, sink, {
-        next: (n) => observeNotification(n, sink),
-      }),
-    );
 

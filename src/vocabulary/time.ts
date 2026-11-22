@@ -33,11 +33,9 @@ import {
   connect,
   debounce,
   defer,
-  dematerialize,
   from,
   LeadingAndTrailing,
   map,
-  materialize,
   race,
   repeat,
   sample,
@@ -54,7 +52,7 @@ import {
 import type { Notification, Observable, ObservableInput, Operator, Scheduler, ThrottleMode } from '../kernel.js';
 import { concat, merge, mergeMap } from './concurrency.js';
 import { of } from './creation.js';
-import { skip, toArray } from './values.js';
+import { dematerialize, materialize, skip, toArray } from './values.js';
 
 // The family's kernel members, so the family is importable from one place
 export { debounce, throttle, throttleWith, audit, sample, window, timeout, timeoutFirst, timeoutFirstAndEach } from '../kernel.js';

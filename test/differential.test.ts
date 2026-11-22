@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import * as rx from 'rxjs';
 import * as fp from '../src/index.js';
-import type { Observable } from '../src/index.js';
+import type { Notification, Observable } from '../src/index.js';
 import { none, some } from '../src/fp/index.js';
 import {
   completingMarbleArb,
@@ -779,6 +779,24 @@ describe('former outliers match RxJS (identity tests, docs/kernel.md)', () => {
     log.length = 0;
     fp.race(named('sync', fp.of('x')), named('unreached', fp.NEVER)).subscribe();
     expect(log).toEqual(['sync:subscribe', 'sync:unsubscribe']);
+  });
+  const showFp = (n: Notification<unknown>): string => `${n.kind}:${n.kind === 'N' ? String(n.value) : n.kind === 'E' ? String(n.error) : ''}`;
+  const showRx = (n: rx.ObservableNotification<unknown>): string => `${n.kind}:${n.kind === 'N' ? String(n.value) : n.kind === 'E' ? String(n.error) : ''}`;
+  prop1('materialize', { ours: ({ a }) => a.pipe(fp.materialize(), fp.map(showFp)), theirs: ({ a }) => a.pipe(rx.materialize(), rx.map(showRx)) });
+  prop1('materialize then dematerialize', {
+    ours: ({ a }) => a.pipe(fp.materialize(), fp.dematerialize()),
+    theirs: ({ a }) => a.pipe(rx.materialize(), rx.dematerialize()),
+  });
+  it('dematerialize on hand-built notification streams: a C ends it, an E errors it, no terminal is fine', () => {
+    const N = (v: string): Notification<string> => fp.nextNotification(v);
+    const cases: Array<[Notification<string>[], rx.ObservableNotification<string>[]]> = [
+      [[N('a'), N('b'), fp.COMPLETE_NOTIFICATION, N('c')], [{ kind: 'N', value: 'a' }, { kind: 'N', value: 'b' }, { kind: 'C' }, { kind: 'N', value: 'c' }]],
+      [[N('a'), fp.errorNotification('boom'), N('c')], [{ kind: 'N', value: 'a' }, { kind: 'E', error: 'boom' }, { kind: 'N', value: 'c' }]],
+      [[N('a')], [{ kind: 'N', value: 'a' }]],
+      [[], []],
+    ];
+    for (const [ours, theirs] of cases)
+      expect(runOurs({}, () => fp.from(ours).pipe(fp.dematerialize()))).toEqual(runTheirs({}, () => rx.from(theirs).pipe(rx.dematerialize())));
   });
   it('subscribeOn and observeOn release their scheduled work on unsubscribe', () => {
     const s = fp.createVirtualScheduler();

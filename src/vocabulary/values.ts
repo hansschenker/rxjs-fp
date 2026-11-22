@@ -11,15 +11,22 @@
  * then say what an empty stream means". `first`, `elementAt`, `find`,
  * `findIndex`, `every` and `isEmpty` differ only in those three choices.
  *
+ * `materialize` and `dematerialize` move between the three channels and one:
+ * `map` to `N`, `concat` with one `C` and `catchError` to one `E`; and back
+ * with `takeWhile` (not `C`), then `mergeMap` into `of` or `throwError`.
+ *
  * Built only on the kernel (checked by test/layering.test.ts), and each
  * definition confirmed against RxJS 7 by test/differential.test.ts.
  */
 import {
   argumentOutOfRangeError,
+  catchError,
+  COMPLETE_NOTIFICATION,
   cont,
   defaultIfEmpty,
   distinctUntilChanged,
   emptyError,
+  errorNotification,
   filter,
   flushError,
   flushWith,
@@ -27,15 +34,19 @@ import {
   identity,
   isSome,
   map,
+  nextNotification,
   notFoundError,
   reduce,
   sequenceError,
   skipWhile,
   take,
   takeLast,
+  takeWhile,
   throwIfEmpty,
 } from '../kernel.js';
-import type { Operator, Option } from '../kernel.js';
+import type { Notification, Observable, Operator, Option } from '../kernel.js';
+import { concat, mergeMap } from './concurrency.js';
+import { of, throwError } from './creation.js';
 
 // The family's kernel members, so the family is importable from one place
 export {
@@ -56,8 +67,6 @@ export {
   halt,
   flushWith,
   flushError,
-  materialize,
-  dematerialize,
   groupBy,
   groupByUntil,
 } from '../kernel.js';
@@ -166,6 +175,33 @@ export const findIndex =
     );
 
 // --- yes/no answers ---------------------------------------------------------
+
+// --- notifications as values ------------------------------------------------
+
+/**
+ * Turns every notification, the terminal ones included, into a value: the
+ * values as `N`, then one `C` on completion (`concat`), or one `E` in place
+ * of an error (`catchError`). Three channels become one.
+ */
+export const materialize =
+  <A>(): Operator<A, Notification<A>> =>
+  (source) =>
+    concat(source.pipe(map(nextNotification)), of(COMPLETE_NOTIFICATION as Notification<A>)).pipe(
+      catchError((error): Observable<Notification<A>> => of(errorNotification(error))),
+    );
+
+/**
+ * The inverse of `materialize`: the values back into their channels. A `C`
+ * ends the stream (`takeWhile`), each `N` is its value (`of`) and an `E` is
+ * its error (`throwError`).
+ */
+export const dematerialize =
+  <A>(): Operator<Notification<A>, A> =>
+  (source) =>
+    source.pipe(
+      takeWhile((n: Notification<A>) => n.kind !== 'C'),
+      mergeMap((n: Notification<A>): Observable<A> => (n.kind === 'N' ? of(n.value) : throwError(() => (n as { readonly error: unknown }).error))),
+    );
 
 /** `false` as soon as a value fails `predicate`; `true` if the source completes first. */
 export const every =
