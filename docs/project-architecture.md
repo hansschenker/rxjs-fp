@@ -1046,9 +1046,11 @@ on those operators: the Monad laws for `of` with `mergeMap` and with `concatMap`
 laws as `merge` with `EMPTY`. `chain` (= `mergeMap`) and `flatten` (= `mergeAll`) stay, as the
 building blocks of the do-notation.
 
-Two lessons from the earlier `rxjs-source-v7-fp` experiment survive as regression tests: an apply
-must agree with `chain` (a `combineLatest`-based one does not), and error recovery is not `merge`
-(`merge(EMPTY, fa) ≡ fa`, which a `catchError`-based "alt" broke).
+One lesson from the earlier `rxjs-source-v7-fp` experiment survives as a regression test: error
+recovery is not `merge` (`merge(EMPTY, fa) ≡ fa`, which a `catchError`-based "alt" broke). The
+other, that an apply must agree with `chain` (a `combineLatest`-based one does not), went with
+`ap`; the idea it protected, dependent steps through `mergeMap` and independent ones through
+`combineLatest`, is stated in docs/fp-vocabulary.md.
 
 There is also a quiet piece of arity hygiene that would be easy to get wrong:
 

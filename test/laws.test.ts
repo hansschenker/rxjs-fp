@@ -2,11 +2,18 @@ import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { concatMap, EMPTY, filter, map, merge, mergeMap, of, type Observable } from '../src/index.js';
 import {
+  ObservableCompactable as C,
   ObservableFilterable as F,
   getConcatMonoid,
   getMergeMonoid,
+  isLeft,
+  isRight,
+  left,
   none,
+  right,
   some,
+  type Either,
+  type Option,
 } from '../src/fp/index.js';
 import type { VirtualScheduler } from '../src/testing/index.js';
 import { bySimultaneity, completingSpec, fromSpec, run, timedSpec, type TimedSpec } from './helpers.js';
@@ -208,6 +215,49 @@ describe('Filterable laws', () => {
         const values = (o: Build) => run(o).flatMap((e) => (e.kind === 'N' ? [e.value] : []));
         const all = values((s) => fromSpec(s)(a));
         expect([...values((s) => parts(s).left), ...values((s) => parts(s).right)].sort()).toEqual([...all].sort());
+      }),
+      runs,
+    );
+  });
+});
+
+/**
+ * Compactable is Filterable at the identity: `compact` is `filterMap(identity)`
+ * and `separate` is `partitionMap(identity)`. `partitionMap` itself is two
+ * `filterMap`s, one per side of the `Either`. Checked in time, terminals included.
+ */
+describe('Compactable laws, and partitionMap against filterMap', () => {
+  const choose = fc.func(fc.boolean());
+  const options = (s: VirtualScheduler, a: TimedSpec, keep: (x: number) => boolean): Observable<Option<number>> =>
+    fromSpec(s)(a).pipe(map((x: number) => (keep(x) ? some(x) : none)));
+  const eithers = (s: VirtualScheduler, a: TimedSpec, toLeft: (x: number) => boolean): Observable<Either<number, number>> =>
+    fromSpec(s)(a).pipe(map((x: number): Either<number, number> => (toLeft(x) ? left(x) : right(x))));
+  const sideOf = (e: Either<number, number>, side: 'left' | 'right'): Option<number> =>
+    side === 'left' ? (isLeft(e) ? some(e.left) : none) : isRight(e) ? some(e.right) : none;
+
+  it('compact ≡ filterMap(identity)', () => {
+    fc.assert(
+      fc.property(timedSpec(), choose, (a, keep) => same((s) => C.compact(options(s, a, keep)), (s) => F.filterMap(options(s, a, keep), (o) => o))),
+      runs,
+    );
+  });
+
+  it('separate ≡ partitionMap(identity), on both sides', () => {
+    fc.assert(
+      fc.property(timedSpec(), choose, (a, toLeft) => {
+        for (const side of ['left', 'right'] as const)
+          same((s) => C.separate(eithers(s, a, toLeft))[side], (s) => F.partitionMap(eithers(s, a, toLeft), (e) => e)[side]);
+      }),
+      runs,
+    );
+  });
+
+  it('partitionMap(f) ≡ filterMap over each side of f', () => {
+    fc.assert(
+      fc.property(timedSpec(), choose, (a, toLeft) => {
+        const f = (x: number): Either<number, number> => (toLeft(x) ? left(x) : right(x));
+        for (const side of ['left', 'right'] as const)
+          same((s) => F.partitionMap(fromSpec(s)(a), f)[side], (s) => F.filterMap(fromSpec(s)(a), (x: number) => sideOf(f(x), side)));
       }),
       runs,
     );
