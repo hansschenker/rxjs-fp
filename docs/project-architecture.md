@@ -735,7 +735,8 @@ closure-as-handle idea as `Subscription.add` (§3.1). The real schedulers are fr
 two closures each, with graceful degradation written as plain `if`s rather than subclass overrides:
 `asapScheduler` uses `queueMicrotask` for delay 0 and delegates to `asyncScheduler` for any real
 delay; `animationFrameScheduler` uses `requestAnimationFrame` where it exists and ~16 ms timeouts
-where it does not.
+where it does not, delegates any real delay to `asyncScheduler` as well, and reads
+`performance.now()` when there is one.
 
 `createQueueScheduler` is the interesting one, because a trampoline is the case where you would most
 expect to need a class — RxJS implements it as `QueueScheduler` plus `QueueAction`, with the action
@@ -787,10 +788,13 @@ scheduling order — without that, marble tests would be flaky by construction. 
 are caught**, not hung: both `advanceTo` and `flush` count actions against a `maxActions` budget
 (default 1,000,000) and throw a diagnostic naming the clock position rather than spinning forever.
 
-Because the scheduler is an argument, the testing story needs no global patching at all: there is no
-`TestScheduler.run()` that swaps `setTimeout` for the duration of a callback, because nothing ever
-reached for `setTimeout` except `asyncScheduler` itself. Passing `createVirtualScheduler()` to
-`debounceTime(300, scheduler)` *is* the entire mechanism.
+Because the scheduler is an argument, the testing story needs no global patching of time: there is no
+`TestScheduler.run()` that swaps `setTimeout` for the duration of a callback, because no operator
+reaches for `setTimeout`. Only two things do: `asyncScheduler` itself, and the unhandled-error
+reporter (`src/core/report.ts`), which rethrows on a fresh stack as RxJS does; the one test that
+provokes such an error uses fake timers for that rethrow (`test/regressions.test.ts`). Promise-based
+sources run on the microtask queue, which no scheduler controls. For everything time-based, passing
+`createVirtualScheduler()` to `debounceTime(300, scheduler)` *is* the entire mechanism.
 
 ---
 

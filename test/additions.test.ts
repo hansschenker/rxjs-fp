@@ -194,6 +194,34 @@ describe('queueScheduler', () => {
   });
 });
 
+describe('virtual scheduler (docs/project-architecture.md §8)', () => {
+  it('actions due in the same frame run in scheduling order', () => {
+    const v = createVirtualScheduler();
+    const log: string[] = [];
+    v.schedule(() => log.push('a'), 5);
+    v.schedule(() => log.push('b'), 5);
+    v.schedule(() => log.push('c'), 0);
+    v.schedule(() => log.push('d'), 5);
+    v.flush();
+    expect(log).toEqual(['c', 'a', 'b', 'd']);
+  });
+
+  it('an endless loop throws the budget error, naming the clock position, instead of hanging', () => {
+    const looping = (delay: number) => {
+      const v = createVirtualScheduler();
+      const step = (): void => {
+        v.schedule(step, delay);
+      };
+      v.schedule(step, delay);
+      return v;
+    };
+    // a zero-delay loop is caught inside advanceTo, at the frame it spins in
+    expect(() => looping(0).flush(Number.POSITIVE_INFINITY, 1000)).toThrow(/more than 1000 actions at t=0; zero-delay loop\?/);
+    // a loop that keeps moving the clock is caught by flush's own budget
+    expect(() => looping(1).flush(Number.POSITIVE_INFINITY, 1000)).toThrow(/more than 1000 actions at t=\d+; zero-delay loop\?/);
+  });
+});
+
 describe('connectable', () => {
   it('starts on connect() and multicasts', () => {
     // without resetOnDisconnect the replayed values outlive the finished connection

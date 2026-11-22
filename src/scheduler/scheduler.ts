@@ -128,7 +128,7 @@ export const createVirtualScheduler = (startTime = 0): VirtualScheduler => {
       const before = queue.length;
       advanceTo(head.time, budget);
       budget -= Math.max(1, before - queue.length);
-      if (budget <= 0) throw new Error(`rxjs-fp VirtualScheduler: more than ${maxActions} actions; zero-delay loop?`);
+      if (budget <= 0) throw new Error(`rxjs-fp VirtualScheduler: more than ${maxActions} actions at t=${clock}; zero-delay loop?`);
     }
   };
 
