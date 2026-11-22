@@ -716,6 +716,34 @@ describe('former outliers match RxJS (identity tests, docs/kernel.md)', () => {
     failing.subscribe({ error: (e) => errors.push(e) });
     expect(errors).toEqual(['e1', 'e2']);
   });
+  prop1('observeOn', { ours: ({ a }, s) => a.pipe(fp.observeOn(s)), theirs: ({ a }, s) => a.pipe(rx.observeOn(s)) });
+  prop1('observeOn with a delay, cut short', {
+    ours: ({ a }, s) => a.pipe(fp.observeOn(s, 2), fp.take(2)),
+    theirs: ({ a }, s) => a.pipe(rx.observeOn(s, 2), rx.take(2)),
+  });
+  prop1('subscribeOn', { ours: ({ a }, s) => a.pipe(fp.subscribeOn(s)), theirs: ({ a }, s) => a.pipe(rx.subscribeOn(s)) });
+  prop1('subscribeOn with a delay, cut short', {
+    ours: ({ a }, s) => a.pipe(fp.subscribeOn(s, 3), fp.take(2)),
+    theirs: ({ a }, s) => a.pipe(rx.subscribeOn(s, 3), rx.take(2)),
+  });
+  it('subscribeOn and observeOn release their scheduled work on unsubscribe', () => {
+    const s = fp.createVirtualScheduler();
+    let subscribed = 0;
+    const src = fp.observable<number>((sink) => {
+      subscribed++;
+      sink.next(1);
+      sink.complete();
+    });
+    src.pipe(fp.subscribeOn(s)).subscribe().unsubscribe();
+    s.flush();
+    expect(subscribed).toBe(0);
+    const out: unknown[] = [];
+    const sub = src.pipe(fp.observeOn(s)).subscribe({ next: (v) => out.push(v), complete: () => out.push('|') });
+    expect(subscribed).toBe(1);
+    sub.unsubscribe();
+    s.flush();
+    expect(out).toEqual([]);
+  });
   it('fromEvent on a Node-style emitter and a DOM-style target: same events, listener removed on unsubscribe', () => {
     const nodeLike = () => {
       const ls = new Set<(e: string) => void>();

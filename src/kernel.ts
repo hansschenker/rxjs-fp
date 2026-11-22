@@ -39,7 +39,7 @@ export type { Notification } from './operators/transform.js';
 export { throwIfEmpty, sequenceEqual } from './operators/conditional.js';
 
 // Time-based
-export { debounce, throttle, throttleWith, audit, sample, timeout, timeoutFirst, timeoutFirstAndEach, observeOn, subscribeOn } from './operators/time.js';
+export { debounce, throttle, throttleWith, audit, sample, timeout, timeoutFirst, timeoutFirstAndEach } from './operators/time.js';
 export { Leading, Trailing, LeadingAndTrailing } from './operators/time.js';
 export { deadlineAfter, deadlineAt, defaultTimeoutErrorPolicy } from './operators/time.js';
 export type {

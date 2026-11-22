@@ -292,45 +292,6 @@ export const timeoutFirstAndEach = <A>(
   duration: positiveMilliseconds(each),
 }), scheduler);
 
-/** Subscribes to the source through the scheduler (after `delayMs`). */
-export const subscribeOn =
-  <A>(scheduler: Scheduler, delayMs = 0): Operator<A, A> =>
-  (source) =>
-    observable((sink) => {
-      let inner: (() => void) | null = null;
-      const cancel = scheduler.schedule(() => {
-        inner = subscribeChild(source, sink).unsubscribe;
-      }, delayMs);
-      return () => {
-        cancel();
-        inner?.();
-      };
-    });
-
-/** Re-delivers every notification through the scheduler. */
-export const observeOn =
-  <A>(scheduler: Scheduler, delayMs = 0): Operator<A, A> =>
-  (source) =>
-    observable((sink) => {
-      const pending = new Set<Teardown>();
-      const run = (f: () => void): void => {
-        const cancel = scheduler.schedule(() => {
-          pending.delete(cancel);
-          f();
-        }, delayMs);
-        pending.add(cancel);
-      };
-      const sub = subscribeChild(source, sink, {
-        next: (a) => run(() => sink.next(a)),
-        error: (e) => run(() => sink.error(e)),
-        complete: () => run(() => sink.complete()),
-      });
-      return () => {
-        sub.unsubscribe();
-        pending.forEach((c) => c());
-      };
-    });
-
 // ---------------------------------------------------------------------------
 // Durations given by Observables instead of milliseconds
 // ---------------------------------------------------------------------------

@@ -53,7 +53,7 @@ own.
 | `from` | adopts any input, through the adapters below | `of`, `EMPTY`, `generate` |
 | `defer` | creates the Observable per subscription | `iif` |
 | `NEVER` | never emits, never terminates | `never()` |
-| `timer` | a value after a delay, optionally repeating | `interval`, and every `…Time` operator |
+| `timer` | a value after a delay, optionally repeating | `interval`, `subscribeOn`, `observeOn`, and every `…Time` operator |
 | `unfold` | generates values from a seed with a pure function | `range` |
 | `using` | ties a resource to the subscription's lifetime | |
 
@@ -85,7 +85,7 @@ the producer keeps nothing (rule 4 of the identity test below).
 | `distinctUntilChanged` | drops a value equal to the previous one | `distinctUntilKeyChanged` |
 | `defaultIfEmpty` | a fallback value if the source completes empty | `first`, `last`, `elementAt` with a default; `find`, `findIndex`, `every`, `isEmpty` |
 | `throwIfEmpty` | an error if the source completes empty | `first`, `last`, `elementAt` without a default; `throwError` |
-| `materialize`, `dematerialize` | notifications as values, and back | |
+| `materialize`, `dematerialize` | notifications as values, and back | `observeOn` |
 | `groupBy`, `groupByUntil` (named core) | one inner Observable per key | |
 
 `first`, `elementAt`, `find`, `findIndex`, `every` and `isEmpty` are one sentence with three choices:
@@ -112,7 +112,6 @@ every window collected into an array.
 | `windowToggle` | a chunk per opening, closed by its own closing | `windowCount`, `windowTimeEvery`, `windowTimeEveryOrCount`, `bufferToggle` |
 | `windowWhen` | back-to-back chunks by a closing factory | `windowTime`, `windowTimeOrCount` |
 | `bufferWhen` | back-to-back arrays by a closing factory | |
-| `observeOn`, `subscribeOn` | move notifications or the subscription onto a scheduler | |
 
 `windowCount` and the four `windowTime…` are compositions of those three shapes: `windowTime` is
 `windowWhen` closed by a timer, `windowTimeEvery` is `windowToggle` opened by an interval, and
@@ -132,7 +131,11 @@ differ from RxJS there. `bufferCount` is not `windowCount` plus `toArray` either
 opens a window on an empty source, so that version would emit `[]` where RxJS emits nothing.
 
 Also vocabulary here: `delay`, `emitAfter`, `delayWhen` (`mergeMap` over a duration), `timestamp`
-(`map` with `scheduler.now()`), `timeInterval` (`timestamp` then `scan`).
+(`map` with `scheduler.now()`), `timeInterval` (`timestamp` then `scan`), and the two scheduling
+operators: `observeOn` is `delay` applied to the notifications instead of the values (`materialize`,
+`delay`, `dematerialize`), so completion and errors wait their turn behind the values before them,
+and `subscribeOn` is a `timer` flattened into the source (`mergeMap`). The adapter `scheduled` spells
+both with kernel operators, since the kernel may not import the vocabulary.
 
 ### Concurrency
 
@@ -212,8 +215,8 @@ a current export count. A smaller kernel is still a goal. Further reductions eac
   kernel is now `window`, `windowToggle`, `windowWhen` and `bufferWhen`.
 - **Trivial sequences** — done. `EMPTY` is `of()` and `throwError` is `EMPTY` with `throwIfEmpty`;
   two base operators went. `NEVER` stays, with the empty producer.
-- **Scheduling.** `observeOn` and `subscribeOn` move work onto a scheduler rather than shaping the
-  stream; they could live with the schedulers instead.
+- **Scheduling** — done, and not by moving them: `observeOn` is `materialize`, `delay` and
+  `dematerialize`, `subscribeOn` is a `timer` flattened into the source. Two base operators went.
 - **Combination.** `withLatestFrom`, `race` and `sequenceEqual` may turn out to be compositions,
   as `takeUntil` and `skipUntil` did.
 - **Notifications.** `materialize` and `dematerialize` could count as one primitive pair beside
@@ -256,7 +259,7 @@ Rules that keep the layering intact:
 | --- | --- | --- |
 | `rxjs-fp/kernel` | `src/kernel.ts` | done: re-exports the kernel plus the types and helpers vocabulary needs |
 | `rxjs-fp/concurrency` | `src/vocabulary/concurrency.ts` | done: `mergeMap`, `concatMap`, `switchMap`, `exhaustMap`, the four `…All`, `merge`, `concat`, `mergeWith`, `concatWith` |
-| `rxjs-fp/time` | `src/vocabulary/time.ts` | done: `delay`, `emitAfter`, `debounceTime`, `throttleTime` and its variants, `throttleTimeWith`, `auditTime`, `sampleTime`, `windowCount`, `windowTime`, `windowTimeEvery`, `windowTimeOrCount`, `windowTimeEveryOrCount` |
+| `rxjs-fp/time` | `src/vocabulary/time.ts` | done: `delay`, `emitAfter`, `debounceTime`, `throttleTime` and its variants, `throttleTimeWith`, `auditTime`, `sampleTime`, `windowCount`, `windowTime`, `windowTimeEvery`, `windowTimeOrCount`, `windowTimeEveryOrCount`, `observeOn`, `subscribeOn` |
 | `rxjs-fp/values` | `src/vocabulary/values.ts` | done: `as`, `withIndex`, `skip`, `ignoreElements`, `count`, `toArray`, `first`, `last`, `elementAt`, `find`, `findIndex`, `every`, `isEmpty`, `distinctUntilKeyChanged` |
 | `rxjs-fp/creation` | `src/vocabulary/creation.ts` | done: `of`, `EMPTY`, `throwError`, `range`, `interval`, `iif` |
 | `rxjs-fp/combination` | `src/vocabulary/combination.ts` | done: `takeUntil`, `forkJoin`, `startWith`, `endWith`, `onErrorResumeNext`, `combineLatestWith`, `zipWith`, `raceWith`, `onErrorResumeNextWith`, `combineLatestAll`, `zipAll`, `partition` |
@@ -267,7 +270,9 @@ Rules that keep the layering intact:
 `test/layering.test.ts` enforces the three rules: vocabulary imports only the kernel, the kernel never
 reaches the vocabulary (checked transitively), and the root exports the same functions as the
 family modules. Kernel files that used a vocabulary operator internally (`delayWhen`,
-`combineLatestAll`, `zipAll`, `startWith`, `endWith`) now call `flatMapWith` directly.
+`combineLatestAll`, `zipAll`, `startWith`, `endWith`) now call `flatMapWith` directly, and
+`scheduled` spells `subscribeOn` and `observeOn` with `timer`, `flatMapWith`, `materialize` and
+`dematerialize`.
 
 ## The identity test
 
@@ -324,6 +329,8 @@ Results so far:
 | `fromEvent` | `fromEventPattern` with add/remove listener | identical events, and the listener is removed on unsubscribe, for Node-style and DOM-style targets |
 | `generate`, `empty()`, `never()` | `from` or `scheduled` over the states; `EMPTY`; `NEVER` | identical, with and without a scheduler |
 | `EMPTY`, `throwError(f)` | `of()`; `EMPTY`, then `throwIfEmpty(f)` | identical: the error arrives before `subscribe` returns, the factory runs once per subscription, and a factory that throws is itself the error |
+| `observeOn(s, ms)` | `materialize`, `delay(ms, s)`, `dematerialize` | identical, with and without a delay, including a `take` that cancels the scheduled notifications |
+| `subscribeOn(s, ms)` | `timer(ms, s)`, then `mergeMap` into the source | identical, with and without a delay; unsubscribing before the task runs never subscribes the source |
 
 ## The naming style for pipelines
 

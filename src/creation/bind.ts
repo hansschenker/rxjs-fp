@@ -2,7 +2,7 @@ import { observable, subscribeChild } from '../core/observable.js';
 import type { Observable } from '../core/types.js';
 import type { Scheduler } from '../scheduler/scheduler.js';
 import { createAsyncSubject } from '../subject/subject.js';
-import { observeOn, subscribeOn } from '../operators/time.js';
+import { scheduled } from './scheduled.js';
 
 /** One callback result: nothing, a single value, or a tuple for several. */
 export type CallbackResult<R extends readonly unknown[]> = R extends readonly [] ? void : R extends readonly [infer X] ? X : R;
@@ -46,7 +46,7 @@ const bindInternal =
       }
       return sub;
     });
-    return scheduler ? bound.pipe(subscribeOn<R>(scheduler), observeOn<R>(scheduler)) : bound;
+    return scheduler ? scheduled(bound, scheduler) : bound;
   };
 
 /**

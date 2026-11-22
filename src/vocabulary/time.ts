@@ -9,6 +9,10 @@
  *   auditTime(ms)     the latest value when the wait ends  audit(() => timer(ms))
  *   sampleTime(ms)    the latest value on every tick       sample(interval(ms)), interval = timer(ms, ms)
  *
+ * `observeOn` and `subscribeOn` are compositions as well: `delay` applied to
+ * the notifications instead of the values (`materialize`, `delay`,
+ * `dematerialize`), and a `timer` flattened into the source (`mergeMap`).
+ *
  * Every buffer operator but one is its window counterpart with each window
  * collected into an array: buffer…(…) = window…(…), then mergeMap(toArray()).
  * The exception is `bufferWhen` (kernel): RxJS 7 opens a new window when the
@@ -29,9 +33,11 @@ import {
   connect,
   debounce,
   defer,
+  dematerialize,
   from,
   LeadingAndTrailing,
   map,
+  materialize,
   race,
   repeat,
   sample,
@@ -45,13 +51,13 @@ import {
   windowToggle,
   windowWhen,
 } from '../kernel.js';
-import type { Observable, ObservableInput, Operator, Scheduler, ThrottleMode } from '../kernel.js';
+import type { Notification, Observable, ObservableInput, Operator, Scheduler, ThrottleMode } from '../kernel.js';
 import { concat, merge, mergeMap } from './concurrency.js';
 import { of } from './creation.js';
 import { skip, toArray } from './values.js';
 
 // The family's kernel members, so the family is importable from one place
-export { debounce, throttle, throttleWith, audit, sample, window, timeout, timeoutFirst, timeoutFirstAndEach, observeOn, subscribeOn } from '../kernel.js';
+export { debounce, throttle, throttleWith, audit, sample, window, timeout, timeoutFirst, timeoutFirstAndEach } from '../kernel.js';
 export { windowToggle, windowWhen, bufferWhen } from '../kernel.js';
 export { Leading, Trailing, LeadingAndTrailing, timer } from '../kernel.js';
 export type { ThrottleMode, ThrottleStrategy } from '../kernel.js';
@@ -73,6 +79,22 @@ export const emitAfter =
  */
 export const delay = <A>(ms: number, scheduler: Scheduler = asyncScheduler): Operator<A, A> =>
   mergeMap<A, A>(emitAfter(ms, scheduler));
+
+/**
+ * Re-delivers every notification through the scheduler, after `delayMs`:
+ * `delay` applied to the notifications instead of the values, so completion
+ * and errors wait their turn behind the values before them.
+ */
+export const observeOn =
+  <A>(scheduler: Scheduler, delayMs = 0): Operator<A, A> =>
+  (source) =>
+    source.pipe(materialize<A>(), delay<Notification<A>>(delayMs, scheduler), dematerialize<A>());
+
+/** Subscribes to the source through the scheduler, after `delayMs`: a timer flattened into the source. */
+export const subscribeOn =
+  <A>(scheduler: Scheduler, delayMs = 0): Operator<A, A> =>
+  (source) =>
+    timer(delayMs, undefined, scheduler).pipe(mergeMap(() => source));
 
 /** Emits a value only after `ms` of silence. A pending value is flushed on completion. */
 export const debounceTime = <A>(ms: number, scheduler: Scheduler = asyncScheduler): Operator<A, A> =>
