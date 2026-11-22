@@ -6,4 +6,4 @@
 - Time-based code takes a `Scheduler` argument; never patch globals.
 - Typeclass instances must stay lawful: add a property test in `test/laws.test.ts` for any new instance.
 - `npm run check` must pass (typecheck, vitest, build). Imports use `.js` extensions (NodeNext).
-- Commits end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- Commits end with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
