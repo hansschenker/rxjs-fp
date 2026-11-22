@@ -3,7 +3,7 @@ import * as rx from 'rxjs';
 import { observable } from '../src/core/observable.js';
 import type { Observable, Observer, Sink } from '../src/core/types.js';
 import * as reporting from '../src/core/report.js';
-import { EMPTY, timer } from '../src/creation/creation.js';
+import { EMPTY, timer } from '../src/vocabulary/creation.js';
 import { take } from '../src/operators/filtering.js';
 import type { Scheduler } from '../src/scheduler/scheduler.js';
 import {

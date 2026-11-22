@@ -1,7 +1,7 @@
 import { observable, subscribeChild } from '../core/observable.js';
 import { cont, flushWith, fromMachine, halt } from '../core/machine.js';
 import type { Operator } from '../core/types.js';
-import { EMPTY } from '../creation/creation.js';
+import { from } from '../creation/creation.js';
 
 /** Keeps values that satisfy the predicate. Narrows the type for refinements. */
 export function filter<A, B extends A>(refinement: (value: A, index: number) => value is B): Operator<A, B>;
@@ -21,7 +21,7 @@ export function filter<A>(predicate: (value: A, index: number) => boolean): Oper
 /** Emits the first `n` values, then completes. */
 export const take = <A>(n: number): Operator<A, A> =>
   n <= 0
-    ? () => EMPTY
+    ? () => from([])
     : fromMachine<number, A, A>({
         init: () => 0,
         step: (seen, a) => (seen + 1 >= n ? halt(seen + 1, [a]) : cont(seen + 1, [a])),
@@ -30,7 +30,7 @@ export const take = <A>(n: number): Operator<A, A> =>
 /** Emits only the last `n` values, on completion. */
 export const takeLast = <A>(n: number): Operator<A, A> =>
   n <= 0
-    ? () => EMPTY
+    ? () => from([])
     : fromMachine<readonly A[], A, A>({
         init: () => [],
         step: (buf, a) => cont(buf.length >= n ? [...buf.slice(1), a] : [...buf, a]),

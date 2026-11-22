@@ -15,9 +15,10 @@
  * Built only on the kernel (checked by test/layering.test.ts), and each
  * definition confirmed against RxJS 7 by test/differential.test.ts.
  */
-import { catchError, combineLatest, EMPTY, filter, from, isSome, map, none, race, scan, some, take, takeLast, takeWhile, zip } from '../kernel.js';
+import { catchError, combineLatest, filter, from, isSome, map, none, race, scan, some, take, takeLast, takeWhile, zip } from '../kernel.js';
 import type { Observable, ObservableInput, Operator, Option, ValueOf, ValuesOf } from '../kernel.js';
 import { concat, merge, mergeMap } from './concurrency.js';
+import { EMPTY } from './creation.js';
 import { toArray } from './values.js';
 
 // The family's kernel members, so the family is importable from one place

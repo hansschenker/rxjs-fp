@@ -25,7 +25,7 @@ export * from './policies/core.js';
 
 // Creation
 export { observable } from './core/observable.js';
-export { from, defer, EMPTY, NEVER, throwError, timer, unfold, using } from './creation/creation.js';
+export { from, defer, NEVER, timer, unfold, using } from './creation/creation.js';
 export { fromIterable, fromArrayLike, fromPromise, fromAsyncIterable, fromSubscribable, fromEventPattern, animationFrames } from './creation/creation.js';
 export type { DomEventTargetLike, NodeEventEmitterLike } from './creation/creation.js';
 export { scheduled } from './creation/scheduled.js';

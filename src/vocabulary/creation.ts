@@ -2,6 +2,8 @@
  * Creation vocabulary: `import { of } from 'rxjs-fp/creation'`.
  *
  *   of(...values)        from(values)
+ *   EMPTY                of()
+ *   throwError(f)        EMPTY.pipe(throwIfEmpty(f))
  *   range(start, count)  unfold: emit n, continue with n + 1, until start + count
  *   interval(ms)         timer(ms, ms)
  *   iif(test, a, b)      defer(() => test() ? a : b)
@@ -11,16 +13,26 @@
  * Built only on the kernel (checked by test/layering.test.ts), and each
  * definition confirmed against RxJS 7 by test/differential.test.ts.
  */
-import { asyncScheduler, defer, EMPTY, from, fromEventPattern, NEVER, none, scheduled, some, timer, unfold } from '../kernel.js';
+import { asyncScheduler, defer, from, fromEventPattern, NEVER, none, scheduled, some, throwIfEmpty, timer, unfold } from '../kernel.js';
 import type { DomEventTargetLike, NodeEventEmitterLike, Observable, ObservableInput, Scheduler } from '../kernel.js';
 
 // The family's kernel members, so the family is importable from one place
-export { observable, from, defer, EMPTY, NEVER, throwError, timer, unfold, using } from '../kernel.js';
+export { observable, from, defer, NEVER, timer, unfold, using } from '../kernel.js';
 export { fromIterable, fromArrayLike, fromPromise, fromAsyncIterable, fromSubscribable, fromEventPattern, scheduled } from '../kernel.js';
 export { animationFrames, bindCallback, bindNodeCallback } from '../kernel.js';
 
 /** Emits the given values synchronously, then completes. */
 export const of = <T extends readonly unknown[]>(...values: T): Observable<T[number]> => from<T[number]>(values);
+
+/** Completes immediately: `of()` with no values. */
+export const EMPTY: Observable<never> = of();
+
+/**
+ * Errors immediately with `factory()`, evaluated once per subscription: the
+ * empty sequence with its completion replaced by an error. A factory that
+ * throws is itself the error, as in RxJS.
+ */
+export const throwError = (factory: () => unknown): Observable<never> => EMPTY.pipe(throwIfEmpty(factory));
 
 /** Emits `count` consecutive integers starting at `start`. */
 export const range = (start: number, count: number): Observable<number> =>

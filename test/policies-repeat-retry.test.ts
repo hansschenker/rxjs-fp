@@ -4,7 +4,7 @@ import * as rx from 'rxjs';
 import { TestScheduler } from 'rxjs/testing';
 import { observable } from '../src/core/observable.js';
 import type { Operator } from '../src/core/types.js';
-import { EMPTY, NEVER, defer, from, throwError, timer } from '../src/creation/creation.js';
+import { EMPTY, NEVER, defer, from, throwError, timer } from '../src/vocabulary/creation.js';
 import { take } from '../src/operators/filtering.js';
 import {
   additionalRetries,

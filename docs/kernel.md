@@ -50,9 +50,9 @@ own.
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
 | `observable` (primitive) | the constructor: a producer function | everything else |
-| `from` | adopts any input, through the adapters below | `of`, `generate` |
+| `from` | adopts any input, through the adapters below | `of`, `EMPTY`, `generate` |
 | `defer` | creates the Observable per subscription | `iif` |
-| `EMPTY`, `NEVER`, `throwError` | the three trivial sequences | `empty()`, `never()` |
+| `NEVER` | never emits, never terminates | `never()` |
 | `timer` | a value after a delay, optionally repeating | `interval`, and every `…Time` operator |
 | `unfold` | generates values from a seed with a pure function | `range` |
 | `using` | ties a resource to the subscription's lifetime | |
@@ -60,6 +60,13 @@ own.
 Adapters: `fromIterable`, `fromArrayLike`, `fromPromise`, `fromAsyncIterable`, `fromSubscribable`,
 `fromEventPattern`, `bindCallback`, `bindNodeCallback`, `animationFrames`, `scheduled`.
 `fromEvent` is vocabulary: `fromEventPattern` with add and remove listener calls on the target.
+
+`EMPTY` and `throwError` are vocabulary too: `EMPTY` is `of()`, the sequence of no values, and
+`throwError(f)` is `EMPTY.pipe(throwIfEmpty(f))`, the empty sequence with its completion replaced
+by an error. `NEVER` keeps its empty producer: no `timer` waits forever (`setTimeout` fires on
+`Infinity`), a Promise that never settles keeps every subscriber reachable, and the one exact
+composition, a Subject that nobody writes to, keeps an observer-list entry per subscriber where
+the producer keeps nothing (rule 4 of the identity test below).
 
 ### Value-based
 
@@ -77,7 +84,7 @@ Adapters: `fromIterable`, `fromArrayLike`, `fromPromise`, `fromAsyncIterable`, `
 | `distinct(key?)` | drops values seen before | |
 | `distinctUntilChanged` | drops a value equal to the previous one | `distinctUntilKeyChanged` |
 | `defaultIfEmpty` | a fallback value if the source completes empty | `first`, `last`, `elementAt` with a default; `find`, `findIndex`, `every`, `isEmpty` |
-| `throwIfEmpty` | an error if the source completes empty | `first`, `last`, `elementAt` without a default |
+| `throwIfEmpty` | an error if the source completes empty | `first`, `last`, `elementAt` without a default; `throwError` |
 | `materialize`, `dematerialize` | notifications as values, and back | |
 | `groupBy`, `groupByUntil` (named core) | one inner Observable per key | |
 
@@ -203,7 +210,8 @@ a current export count. A smaller kernel is still a goal. Further reductions eac
 - **The window family** — done. `windowCount` and the four `windowTime…` are vocabulary over
   `windowToggle`, `windowWhen` and timers; one base operator and one named core went. The window
   kernel is now `window`, `windowToggle`, `windowWhen` and `bufferWhen`.
-- **Trivial sequences.** `EMPTY`, `NEVER` and `throwError` are one idea; counted as one, two go.
+- **Trivial sequences** — done. `EMPTY` is `of()` and `throwError` is `EMPTY` with `throwIfEmpty`;
+  two base operators went. `NEVER` stays, with the empty producer.
 - **Scheduling.** `observeOn` and `subscribeOn` move work onto a scheduler rather than shaping the
   stream; they could live with the schedulers instead.
 - **Combination.** `withLatestFrom`, `race` and `sequenceEqual` may turn out to be compositions,
@@ -250,7 +258,7 @@ Rules that keep the layering intact:
 | `rxjs-fp/concurrency` | `src/vocabulary/concurrency.ts` | done: `mergeMap`, `concatMap`, `switchMap`, `exhaustMap`, the four `…All`, `merge`, `concat`, `mergeWith`, `concatWith` |
 | `rxjs-fp/time` | `src/vocabulary/time.ts` | done: `delay`, `emitAfter`, `debounceTime`, `throttleTime` and its variants, `throttleTimeWith`, `auditTime`, `sampleTime`, `windowCount`, `windowTime`, `windowTimeEvery`, `windowTimeOrCount`, `windowTimeEveryOrCount` |
 | `rxjs-fp/values` | `src/vocabulary/values.ts` | done: `as`, `withIndex`, `skip`, `ignoreElements`, `count`, `toArray`, `first`, `last`, `elementAt`, `find`, `findIndex`, `every`, `isEmpty`, `distinctUntilKeyChanged` |
-| `rxjs-fp/creation` | `src/vocabulary/creation.ts` | done: `of`, `range`, `interval`, `iif` |
+| `rxjs-fp/creation` | `src/vocabulary/creation.ts` | done: `of`, `EMPTY`, `throwError`, `range`, `interval`, `iif` |
 | `rxjs-fp/combination` | `src/vocabulary/combination.ts` | done: `takeUntil`, `forkJoin`, `startWith`, `endWith`, `onErrorResumeNext`, `combineLatestWith`, `zipWith`, `raceWith`, `onErrorResumeNextWith`, `combineLatestAll`, `zipAll`, `partition` |
 | `rxjs-fp/errors` | `src/vocabulary/errors.ts` | done: `retry`, `times`, `timesWithDelay`, `exponentialBackoff`, `catchTimeout`, `onErrorReturn` |
 | `rxjs-fp/multicast` | `src/vocabulary/multicast.ts` | done: `share`, `shareReplay`, `shareLatest`, `publish`, `publishReplay`, `publishBehavior`, `publishLast` |
@@ -315,6 +323,7 @@ Results so far:
 | `filterMap`, `timeInterval`, `delayWhen`, `timestamp` | `map`/`filter`/`map`; `timestamp` then `scan`; `mergeMap` over the duration; `map` with `scheduler.now()` | identical |
 | `fromEvent` | `fromEventPattern` with add/remove listener | identical events, and the listener is removed on unsubscribe, for Node-style and DOM-style targets |
 | `generate`, `empty()`, `never()` | `from` or `scheduled` over the states; `EMPTY`; `NEVER` | identical, with and without a scheduler |
+| `EMPTY`, `throwError(f)` | `of()`; `EMPTY`, then `throwIfEmpty(f)` | identical: the error arrives before `subscribe` returns, the factory runs once per subscription, and a factory that throws is itself the error |
 
 ## The naming style for pipelines
 

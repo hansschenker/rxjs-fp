@@ -14,8 +14,9 @@
  * Built only on the kernel (checked by test/layering.test.ts), and each
  * definition confirmed against RxJS 7 by test/differential.test.ts.
  */
-import { catchError, giveUp, isTimeoutError, retryAfter, retryNow, throwError } from '../kernel.js';
+import { catchError, giveUp, isTimeoutError, retryAfter, retryNow } from '../kernel.js';
 import type { ObservableInput, Operator, RetryDecisionPolicy, TimeoutInfo } from '../kernel.js';
+import { throwError } from './creation.js';
 
 // The family's kernel members, so the family is importable from one place
 export {

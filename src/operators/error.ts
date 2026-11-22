@@ -1,7 +1,7 @@
 import { observable, subscribeChild } from '../core/observable.js';
 import { createSubscription } from '../core/subscription.js';
 import type { Observable, Operator, Sink, Subscription } from '../core/types.js';
-import { EMPTY, from, throwError, timer, type ObservableInput } from '../creation/creation.js';
+import { from, timer, type ObservableInput } from '../creation/creation.js';
 import { asyncScheduler, type Scheduler } from '../scheduler/scheduler.js';
 import { assertNever, immediate, natural } from '../policies/core.js';
 import type { AfterDelay, ImmediateDelay, NonNegativeInt, Signal } from '../policies/core.js';
@@ -245,20 +245,20 @@ const decisionSignal = (policy: RetryDecisionPolicy, scheduler: Scheduler): Retr
   switch (decision._tag) {
     case 'RetryNow': return [undefined];
     case 'RetryAfter': return timer(decision.ms, undefined, scheduler);
-    case 'GiveUp': return throwError(() => error);
+    case 'GiveUp': return observable<never>((sink) => sink.error(error));
     default: return assertNever(decision);
   }
 };
 
 /**
  * Interpret the repeat policy directly. Total runs include the first source
- * connection; zero returns EMPTY without connecting. Only completion repeats:
+ * connection; zero completes at once without connecting. Only completion repeats:
  * source errors pass through. Immediate and after(0) remain distinct modes.
  */
 export const repeat = <A>(policy: RepeatPolicy = defaultRepeatPolicy(), scheduler: Scheduler = asyncScheduler): Operator<A, A> => {
   const count = repeatCount(policy.limit);
   const delay: RepeatDelay = { ...policy.delay };
-  if (count === 0) return () => EMPTY;
+  if (count === 0) return () => from([]);
 
   return (source) => observable<A>((sink) => {
     let completedRuns = 0;

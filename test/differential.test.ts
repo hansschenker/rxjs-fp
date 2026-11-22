@@ -697,6 +697,25 @@ describe('former outliers match RxJS (identity tests, docs/kernel.md)', () => {
     same({}, { ours: () => fp.merge(fp.empty(), fp.of('x')), theirs: () => rx.merge(rx.EMPTY, rx.of('x')) });
     same({}, { ours: (_, s) => fp.never().pipe(fp.takeUntil(fp.timer(3, undefined, s))), theirs: (_, s) => rx.NEVER.pipe(rx.takeUntil(rx.timer(3, s))) });
   });
+  it('EMPTY and throwError are vocabulary: of(), and EMPTY with throwIfEmpty', () => {
+    same({}, { ours: () => fp.EMPTY, theirs: () => rx.EMPTY });
+    same({}, { ours: () => fp.throwError(() => 'boom'), theirs: () => rx.throwError(() => 'boom') });
+    // a factory that throws is itself the error, in both libraries
+    same({}, {
+      ours: () => fp.throwError(() => { throw 'inner'; }),
+      theirs: () => rx.throwError(() => { throw 'inner'; }),
+    });
+    expect(fp.empty()).toBe(fp.EMPTY);
+    // the factory runs once per subscription, and the error arrives before subscribe returns
+    let calls = 0;
+    const errors: unknown[] = [];
+    const failing = fp.throwError(() => `e${++calls}`);
+    expect(calls).toBe(0);
+    failing.subscribe({ error: (e) => errors.push(e) });
+    expect(errors).toEqual(['e1']);
+    failing.subscribe({ error: (e) => errors.push(e) });
+    expect(errors).toEqual(['e1', 'e2']);
+  });
   it('fromEvent on a Node-style emitter and a DOM-style target: same events, listener removed on unsubscribe', () => {
     const nodeLike = () => {
       const ls = new Set<(e: string) => void>();

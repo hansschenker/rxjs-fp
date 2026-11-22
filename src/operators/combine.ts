@@ -1,6 +1,6 @@
 import { observable, subscribeChild } from '../core/observable.js';
 import type { Observable, Operator, Subscription, ValueOf, ValuesOf } from '../core/types.js';
-import { EMPTY } from '../creation/creation.js';
+import { from } from '../creation/creation.js';
 
 const runAll = <T extends readonly Observable<unknown>[]>(
   sources: T,
@@ -24,7 +24,7 @@ const runAll = <T extends readonly Observable<unknown>[]>(
  */
 export const combineLatest = <const T extends readonly Observable<unknown>[]>(sources: T): Observable<ValuesOf<T>> =>
   sources.length === 0
-    ? EMPTY
+    ? from([])
     : observable<ValuesOf<T>>((sink) => {
         const n = sources.length;
         const values: unknown[] = new Array(n);
@@ -52,7 +52,7 @@ export const combineLatest = <const T extends readonly Observable<unknown>[]>(so
 /** Pairs values by index: the k-th tuple holds the k-th value of every source. */
 export const zip = <const T extends readonly Observable<unknown>[]>(sources: T): Observable<ValuesOf<T>> =>
   sources.length === 0
-    ? EMPTY
+    ? from([])
     : observable<ValuesOf<T>>((sink) => {
         const buffers: unknown[][] = sources.map(() => []);
         const done: boolean[] = sources.map(() => false);

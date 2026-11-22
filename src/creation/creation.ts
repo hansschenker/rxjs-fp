@@ -13,13 +13,12 @@ export type ObservableInput<A> =
   | AsyncIterable<A>
   | ArrayLike<A>;
 
-/** Completes immediately. */
-export const EMPTY: Observable<never> = observable((sink) => sink.complete());
-/** Never emits, never terminates. */
+/**
+ * Never emits, never terminates. The other two trivial sequences are
+ * vocabulary (src/vocabulary/creation.ts): `EMPTY` is `of()`, and
+ * `throwError` is `EMPTY` with `throwIfEmpty`.
+ */
 export const NEVER: Observable<never> = observable(() => {});
-/** Errors immediately with the value produced by `factory` (evaluated per subscription). */
-export const throwError = (factory: () => unknown): Observable<never> =>
-  observable((sink) => sink.error(factory()));
 
 /** Creates the Observable lazily, once per subscription. */
 export const defer = <A>(factory: () => ObservableInput<A>): Observable<A> =>
@@ -155,7 +154,7 @@ export const from = <A>(input: ObservableInput<A>): Observable<A> => {
   if (isAsyncIterable(input)) return fromAsyncIterable(input as AsyncIterable<A>);
   if (isIterable(input)) return fromIterable(input as Iterable<A>);
   if (typeof input === 'object' && input !== null && 'length' in input) return fromArrayLike(input as ArrayLike<A>);
-  return throwError(() => new TypeError(`rxjs-fp: cannot convert ${String(input)} to an Observable`));
+  return observable<never>((sink) => sink.error(new TypeError(`rxjs-fp: cannot convert ${String(input)} to an Observable`)));
 };
 
 /**
@@ -241,7 +240,7 @@ export const using = <A, R extends Unsubscribable | void>(
       if (resource) resource.unsubscribe();
     });
     const result = observableFactory(resource);
-    subscribeChild(result ? from(result) : EMPTY, sink);
+    subscribeChild(from(result || []), sink); // no Observable from the factory: nothing to emit
   });
 
 /**
