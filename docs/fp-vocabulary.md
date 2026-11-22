@@ -256,7 +256,10 @@ yourself.
 ## Left out on purpose
 
 These fp-ts concepts were in rxjs-fp until November 2026 and were removed because they are too far
-from what an RxJS user writes. Their laws are still tested, on the operators in the right column.
+from what an RxJS user writes. The Monad laws are still tested, on `of` with `mergeMap` and with
+`concatMap`, and the Alt and Plus laws as `merge` with `EMPTY` (`test/laws.test.ts`). The replacements
+for `ap`, that is `combineLatest`, `zip` and `forkJoin`, are checked against RxJS instead
+(`test/differential.test.ts`), not against the Applicative laws.
 
 | Removed | Write instead |
 | --- | --- |
