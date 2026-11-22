@@ -3,7 +3,6 @@ import { reportUnhandledError } from './report.js';
 import { pipeArray } from './pipe.js';
 import {
   OBSERVABLE_BRAND,
-  OBSERVABLE_KEY,
   type Observable,
   type Observer,
   type Operator,
@@ -169,7 +168,6 @@ export const observable = <A>(producer: Producer<A>): Observable<A> => {
     [OBSERVABLE_BRAND]: true as const,
     subscribe,
     pipe: pipe as Observable<A>['pipe'],
-    [OBSERVABLE_KEY]: () => self,
   });
   return self;
 };

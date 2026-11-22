@@ -135,6 +135,7 @@ Left out on purpose, because RxJS 7 deprecates them and RxJS 8 removes them: `mu
 Known differences:
 - **`combineLatest`** (deliberate) completes as soon as one input completes without having emitted, because no combination can ever be produced. RxJS waits for the other inputs to complete. `combineLatestAll` inherits this.
 - **`sequenceEqual`** (deliberate) answers `false` for sequences of different length. RxJS 7.8.2 answers `true` when the longer side's extra value arrives before the shorter side completes and the longer side completes last (`ab|` against `a|`), because it never checks its own leftover buffer.
+- **`from` on an input it cannot convert** (deliberate) returns an Observable that errors with a `TypeError` on subscription. RxJS throws from `from()` at call time. Building a pipeline can therefore never throw; a wrong input is noticed when it is subscribed.
 - **`windowToggle`**: an error from `openings` also errors the open windows.
 - **`windowTimeEveryOrCount`**: when a value fills one window while others are open, every open window receives the value before the full one closes; RxJS closes the full window before handing the value to the next one. Values, frames and window membership are identical, only that same-frame order differs. (`bufferTimeEveryOrCount` is unaffected: a buffer is only observable when it closes.)
 - **Algebraic policy APIs** (rule 7). The six policy families intentionally replace the RxJS config and numeric overloads. Schedulers stay explicit final arguments. The [migration guide](docs/algebraic-policies.md) gives complete examples.
@@ -217,7 +218,7 @@ intents ──map(update)──▶ reducer streams ──merge──▶ reducer$
 
 ## Interop with RxJS
 
-- **RxJS reading rxjs-fp:** rxjs-fp Observables expose `'@@observable'`, so `rx.from(ours)` works at runtime. RxJS types its interop key as `Symbol.observable`, so TypeScript needs a cast: `rx.from(ours as unknown as rx.InteropObservable<T>)`.
+- **RxJS reading rxjs-fp:** rxjs-fp implements no Observable interop protocol, since none is part of JavaScript. Wrap by hand: `new rx.Observable((s) => ours.subscribe(s))`. Unsubscription crosses that boundary, so `rx.take(1)` stops even a synchronous rxjs-fp source.
 - **rxjs-fp reading RxJS:** `from(rxObservable)` adopts any object with `subscribe`.
 
 ## Background

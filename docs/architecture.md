@@ -15,7 +15,7 @@ src/testing     marble parser · runMarbles · record
 
 ## The execution model
 
-1. `observable(producer)` returns a frozen record `{ subscribe, pipe, [@@observable] }`.
+1. `observable(producer)` returns a frozen record `{ subscribe, pipe }` carrying a brand symbol.
 2. `subscribe(observer)`:
    1. creates a `Subscription`, which is a closed flag plus a set of finalizers;
    2. wraps the observer in a **sink** that enforces `next* (error | complete)?`;

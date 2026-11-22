@@ -5,11 +5,13 @@ import { firstValueFrom, firstValueFromOr, lastValueFrom, lastValueFromOr, toAsy
 import { collect } from './helpers.js';
 
 describe('interop with RxJS 7', () => {
-  it('RxJS consumes rxjs-fp Observables via @@observable', async () => {
-    // rxjs types its interop key as `Symbol.observable`; at runtime it falls back
-    // to '@@observable', which rxjs-fp implements. Hence the cast.
-    const ours = of(1, 2, 3) as unknown as rx.InteropObservable<number>;
-    const values = await rx.firstValueFrom(rx.from(ours).pipe(rx.map((x) => x * 2), rx.toArray()));
+  it('RxJS reads rxjs-fp Observables through a hand-written wrapper: rxjs-fp implements no interop protocol', async () => {
+    expect(() => rx.from(of(1, 2, 3) as unknown as rx.ObservableInput<number>)).toThrow(TypeError);
+    const bridged = new rx.Observable<number>((s) => {
+      const sub = of(1, 2, 3).subscribe(s);
+      return () => sub.unsubscribe();
+    });
+    const values = await rx.firstValueFrom(bridged.pipe(rx.map((x) => x * 2), rx.toArray()));
     expect(values).toEqual([2, 4, 6]);
   });
 
@@ -25,6 +27,12 @@ describe('interop with RxJS 7', () => {
     });
     from(theirs).subscribe().unsubscribe();
     expect(torn).toBe(true);
+  });
+
+  it('from reports an input it cannot convert on subscription, where RxJS throws at call time (README)', () => {
+    expect(() => rx.from(42 as unknown as rx.ObservableInput<number>)).toThrow(TypeError);
+    const ours = from(42 as never);
+    expect(collect(ours)).toEqual(['#rxjs-fp: cannot convert 42 to an Observable']);
   });
 });
 

@@ -168,7 +168,11 @@ describe('interop: unsubscription crosses the boundary synchronously', () => {
   it('rxjs-fp → RxJS: R.take(1) stops a synchronous rxjs-fp source', () => {
     const c = counting(100_000);
     const values: number[] = [];
-    R.from(c.src as unknown as R.InteropObservable<number>)
+    // no interop protocol: the caller wraps by hand, and the RxJS subscriber's unsubscription still reaches the producer
+    new R.Observable<number>((s) => {
+      const sub = c.src.subscribe(s);
+      return () => sub.unsubscribe();
+    })
       .pipe(R.take(1))
       .subscribe((v) => values.push(v));
     expect(values).toEqual([0]);

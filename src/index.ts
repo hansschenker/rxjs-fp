@@ -19,7 +19,6 @@ export type {
   ValueOf,
   ValuesOf,
 } from './core/types.js';
-export { OBSERVABLE_KEY } from './core/types.js';
 export { observable, isObservable, subscribeChild } from './core/observable.js';
 export type { ChildHandlers } from './core/observable.js';
 export { createSubscription, EMPTY_SUBSCRIPTION, isSubscription, isUnsubscriptionError } from './core/subscription.js';

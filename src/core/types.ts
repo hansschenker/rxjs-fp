@@ -56,9 +56,6 @@ export interface Subscribable<A> {
   subscribe(observer: Partial<Observer<A>>): { unsubscribe(): void };
 }
 
-/** The interop key used by RxJS 7 when `Symbol.observable` is not polyfilled. */
-export const OBSERVABLE_KEY = '@@observable' as const;
-
 /** Brand used by `isObservable`. */
 export const OBSERVABLE_BRAND: unique symbol = Symbol.for('rxjs-fp/Observable');
 
@@ -71,8 +68,6 @@ export interface Observable<A> {
   readonly subscribe: (observer?: Partial<Observer<A>> | ((value: A) => void)) => Subscription;
   /** Convenience: `obs.pipe(f, g)` is `g(f(obs))`. A closure, not a method using `this`. */
   readonly pipe: PipeMethod<A>;
-  /** Interop: lets RxJS `from(...)` consume rxjs-fp Observables. */
-  readonly [OBSERVABLE_KEY]: () => Observable<A>;
 }
 
 /** A transformation from one Observable to another (RxJS's `OperatorFunction`). */

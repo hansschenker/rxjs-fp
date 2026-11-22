@@ -68,13 +68,12 @@ export const observable = <A>(producer: Producer<A>): Observable<A> => {
     [OBSERVABLE_BRAND]: true as const,
     subscribe,
     pipe: pipe as Observable<A>['pipe'],
-    [OBSERVABLE_KEY]: () => self,
   });
   return self;
 };
 ```
 
-Four properties, three of them closures, and the record is frozen (`src/core/observable.ts:168`).
+Three properties, two of them closures, and the record is frozen (`src/core/observable.ts:167`).
 Note the `let self` declared before the object and assigned to it: that is how a method-free record
 refers to itself without `this`. The `pipe` closure captures `self` lexically, so `obs.pipe(f)` and
 `pipe(obs, f)` are the same computation — and detaching the method (`const p = obs.pipe`) cannot
@@ -811,7 +810,7 @@ if (isPromiseLike(input)) return fromPromise(input);              // typeof .the
 if (isAsyncIterable(input)) return fromAsyncIterable(input);      // Symbol.asyncIterator in x
 if (isIterable(input)) return fromIterable(input);                // typeof x[Symbol.iterator] === 'function'
 if (typeof input === 'object' && input !== null && 'length' in input) return fromArrayLike(input);
-return throwError(() => new TypeError(`rxjs-fp: cannot convert ${String(input)} to an Observable`));
+return observable<never>((sink) => sink.error(new TypeError(`rxjs-fp: cannot convert ${String(input)} to an Observable`)));
 ```
 
 Order matters and is deliberate: an rxjs-fp Observable is checked first (identity, cheap), foreign
@@ -819,6 +818,10 @@ Order matters and is deliberate: an rxjs-fp Observable is checked first (identit
 test. `isObservable` is the only branch that uses a brand, and it uses a symbol created with
 `Symbol.for('rxjs-fp/Observable')` — so even two copies of the library in one bundle recognise each
 other's Observables, which `instanceof` would not.
+
+The fallback is reported on subscription, as an error notification, where RxJS throws from `from()`
+itself at call time. That is deliberate (README, known differences): building a pipeline can then
+never throw, at the cost of noticing a wrong input later.
 
 Three creation functions are worth singling out.
 
@@ -860,30 +863,36 @@ is what makes §3.3's `take(1)` story work.
 Three further creation modules sit beside `creation.ts` and are worth placing:
 
 - **`scheduled(input, scheduler)`** (`src/creation/scheduled.ts`) is `from` with a clock. Iterables
-  and array-likes emit one value per scheduler task; anything already Observable-like is routed
-  through `from(input).pipe(subscribeOn(scheduler), observeOn(scheduler))` — a derivation rather
-  than a reimplementation, which is only possible because both are ordinary operators.
+  and array-likes emit one value per scheduler task; anything already Observable-like is subscribed
+  and observed on the scheduler: `subscribeOn` then `observeOn`. Both are vocabulary compositions (a
+  timer flattened into the source; `materialize`, `delay`, `dematerialize`), so the kernel spells them
+  with its own operators in a private helper instead of importing the vocabulary, and `bindCallback`
+  with a scheduler calls `scheduled`. A derivation rather than a reimplementation, which is only
+  possible because scheduling is ordinary operator composition.
 - **`generate(initial, condition, iterate)`** is the imperative `for` loop as an Observable, its
   three arguments in the order of a `for` header; map the states with `map`. It is the interesting
-  counterpart to `unfold` below: same expressive power, opposite ergonomics. `unfold` is the
+  counterpart to `unfold` above: same expressive power, opposite ergonomics. `unfold` is the
   categorical anamorphism with one function returning `Option<[value, nextSeed]>`; `generate` is
   the loop a JavaScript developer already knows, spelled as three arguments. Shipping both is a deliberate concession that the honest FP formulation is
   not always the teachable one.
 - **`bindCallback` / `bindNodeCallback`** (`src/creation/bind.ts`) wrap callback-style APIs, with a
   `CallbackResult` conditional type that collapses zero arguments to `void`, one to the value itself,
-  and several to the tuple — the arity handling done in the type system rather than at runtime.
+  and several to the tuple — the arity stated once in the type system and mirrored by a one-line
+  collapse at runtime (`results.length <= 1 ? results[0] : results`).
 
 `fromEvent` shows how a union of two unrelated target shapes is handled without a type hierarchy:
 five overloads give precise event types for `HTMLElement`, `Window`, `Document`, a generic DOM-like
 target and a Node `EventEmitter`, and the implementation discriminates with `'addEventListener' in target`,
 returning the matching removal call as its teardown.
 
-In the outbound direction, `OBSERVABLE_KEY` is the string `'@@observable'`
-(`src/core/types.ts:60`). RxJS's `from()` looks that key up and calls it, so `rx.from(ours)` works at
-runtime against a plain frozen record — no shared base class, no registration. The two libraries meet
-on a *protocol*, which is all a protocol ever needed to be. The one wrinkle is types, not runtime:
-RxJS declares its interop key as `Symbol.observable`, so TypeScript needs
-`rx.from(ours as unknown as rx.InteropObservable<T>)`.
+In the outbound direction there is no interop protocol: an Observable record is the brand,
+`subscribe` and `pipe`, and nothing else. No shared Observable protocol is part of JavaScript, and
+rxjs-fp implements none, so RxJS's `from()` does not read an rxjs-fp stream by itself. Handing one to
+RxJS is one line of the caller's own, `new rx.Observable((s) => ours.subscribe(s))` with the
+subscription returned as its teardown (`test/interop.test.ts`). That bridge is exact: `subscribe`
+recognises a foreign subscriber by its `closed` flag and `add` and links the execution to it
+(`src/core/observable.ts`), so when RxJS's `take(1)` unsubscribes, a synchronous rxjs-fp producer
+stops at once (`test/review-regressions.test.ts`).
 
 ---
 
