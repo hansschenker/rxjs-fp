@@ -1,11 +1,14 @@
 /**
  * Combination vocabulary: `import { combineLatestWith } from 'rxjs-fp/combination'`.
  *
- * Built on the combination kernel (`combineLatest`, `zip`, `withLatestFrom`,
- * `race`) and the concurrency vocabulary (`merge`, `concat`, `mergeMap`).
+ * Built on the combination kernel (`combineLatest`, `zip`, `race`) and the
+ * concurrency vocabulary (`merge`, `concat`, `mergeMap`). Several definitions
+ * start from `ended(source)`: the values as `some`, then one `none` for the end.
  *
  *   takeUntil(n)          merge the notifier and the source's end (both as "stop") into the source, stop at the first "stop"
  *   skipUntil(n)          the same merge, but the notifier's first value opens a gate instead
+ *   withLatestFrom(…o)    merge the others, tagged, into the ended source; a machine keeps their latest values and emits on source values
+ *   sequenceEqual(b)      zip the two ended sequences, then every pair must agree
  *   forkJoin(sources)     combineLatest of each source's last value
  *   startWith / endWith   concat with the values
  *   onErrorResumeNext     concat, each source with its error replaced by EMPTY
@@ -15,17 +18,21 @@
  * Built only on the kernel (checked by test/layering.test.ts), and each
  * definition confirmed against RxJS 7 by test/differential.test.ts.
  */
-import { catchError, combineLatest, filter, from, isSome, map, none, race, scan, some, take, takeLast, takeWhile, zip } from '../kernel.js';
+import { catchError, combineLatest, cont, filter, from, fromMachine, halt, isSome, map, none, race, scan, some, take, takeLast, takeWhile, zip } from '../kernel.js';
 import type { Observable, ObservableInput, Operator, Option, ValueOf, ValuesOf } from '../kernel.js';
 import { concat, merge, mergeMap } from './concurrency.js';
 import { EMPTY } from './creation.js';
-import { toArray } from './values.js';
+import { every, toArray } from './values.js';
 
 // The family's kernel members, so the family is importable from one place
-export { combineLatest, zip, withLatestFrom, race, sequenceEqual } from '../kernel.js';
+export { combineLatest, zip, race } from '../kernel.js';
 
 type Sources = readonly Observable<unknown>[];
 type InputValue<T extends readonly ObservableInput<unknown>[]> = T[number] extends ObservableInput<infer V> ? V : never;
+
+/** A sequence with its end made visible: every value as `some`, then one `none`. Errors pass through. */
+const ended = <A>(source: Observable<A>): Observable<Option<A>> =>
+  concat(source.pipe(map((a: A): Option<A> => some(a))), from([none as Option<A>]));
 
 /**
  * Mirrors the source until `notifier` emits, then completes. The notifier is
@@ -38,10 +45,7 @@ type InputValue<T extends readonly ObservableInput<unknown>[]> = T[number] exten
 export const takeUntil =
   <A>(notifier: Observable<unknown>): Operator<A, A> =>
   (source) =>
-    merge(
-      notifier.pipe(take(1), map((): Option<A> => none)),
-      concat(source.pipe(map((a: A) => some(a))), from([none as Option<A>])),
-    ).pipe(
+    merge(notifier.pipe(take(1), map((): Option<A> => none)), ended(source)).pipe(
       takeWhile(isSome),
       map((o) => (o as { readonly value: A }).value),
     );
@@ -67,6 +71,52 @@ export const endWith =
 /** Subscribes to the sources one after another; an error just moves on to the next. */
 export const onErrorResumeNext = <const T extends readonly ObservableInput<unknown>[]>(...sources: T): Observable<InputValue<T>> =>
   concat(...sources.map((s) => from(s as ObservableInput<InputValue<T>>).pipe(catchError(() => EMPTY))));
+
+/** An arrival in the merged stream of `withLatestFrom`: from one of the others, or from the source (`-1`). */
+type Arrival = { readonly from: number; readonly value: unknown };
+
+/**
+ * Combines each source value with the latest values of `others`; source
+ * values arriving before every other has emitted are dropped. The others
+ * are subscribed first, as in RxJS, so synchronous others are ready.
+ *
+ * The `skipUntil` shape, generalised: the others (tagged) and the ended
+ * source become one stream, and a machine keeps the latest value of each
+ * other. A source value is emitted with them once every slot is filled; the
+ * source's `none` halts the machine, while the others' ends do not matter.
+ */
+export const withLatestFrom =
+  <A, const T extends Sources>(...others: T): Operator<A, [A, ...ValuesOf<T>]> =>
+  (source) =>
+    merge(
+      ...others.map((other, i) => other.pipe(map((value): Option<Arrival> => some({ from: i, value })))),
+      ended(source.pipe(map((value: A): Arrival => ({ from: -1, value })))),
+    ).pipe(
+      fromMachine<ReadonlyArray<Option<unknown>>, Option<Arrival>, [A, ...ValuesOf<T>]>({
+        init: () => others.map((): Option<unknown> => none),
+        step: (latest, arrival) => {
+          if (!isSome(arrival)) return halt(latest);
+          const { from: i, value } = arrival.value;
+          if (i !== -1) return cont(latest.map((o, j) => (j === i ? some(value) : o)));
+          if (!latest.every(isSome)) return cont(latest);
+          return cont(latest, [[value, ...latest.map((o) => (o as { readonly value: unknown }).value)] as [A, ...ValuesOf<T>]]);
+        },
+      }),
+    );
+
+/**
+ * Emits `true` if the source and `compareTo` emit equal sequences (by
+ * `comparator`, default `===`), `false` as soon as they differ: `zip` the two
+ * ended sequences and ask `every` pair to agree, `none` with `none` included.
+ * A value paired with the other side's end is a difference, so sequences of
+ * different length are unequal (RxJS 7.8.2 can answer `true` there: README).
+ */
+export const sequenceEqual =
+  <A>(compareTo: ObservableInput<A>, comparator: (a: A, b: A) => boolean = (a, b) => a === b): Operator<A, boolean> =>
+  (source) =>
+    zip([ended(source), ended(from(compareTo))]).pipe(
+      every(([x, y]) => (isSome(x) && isSome(y) ? comparator(x.value, y.value) : !isSome(x) && !isSome(y))),
+    );
 
 /** Operator form of `combineLatest`: `[source, ...others]`. */
 export const combineLatestWith =
@@ -131,10 +181,7 @@ type Gate<A> = { readonly open: boolean; readonly out: Option<A> };
 export const skipUntil =
   <A>(notifier: Observable<unknown>): Operator<A, A> =>
   (source) =>
-    merge(
-      notifier.pipe(take(1), map((): Gated<A> => OPEN)),
-      concat(source.pipe(map((a: A): Gated<A> => some(a))), from([none as Gated<A>])),
-    ).pipe(
+    merge(notifier.pipe(take(1), map((): Gated<A> => OPEN)), ended(source)).pipe(
       takeWhile((x: Gated<A>) => x === OPEN || isSome(x)),
       scan<Gated<A>, Gate<A>>((gate, x) => (x === OPEN ? { open: true, out: none } : { open: gate.open, out: gate.open ? x : none }), {
         open: false,

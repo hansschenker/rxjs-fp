@@ -72,7 +72,7 @@ the producer keeps nothing (rule 4 of the identity test below).
 
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
-| `fromMachine` (primitive) | runs a machine: `init`, pure `step` and `flush` | the machines below, and `pairwise`, `skipLast`, `single`, `max`, `min`, `bufferCount` |
+| `fromMachine` (primitive) | runs a machine: `init`, pure `step` and `flush` | the machines below, and `pairwise`, `skipLast`, `single`, `max`, `min`, `bufferCount`, `withLatestFrom` |
 | `map` | transforms each value | `as`, `withIndex`, `filterMap` |
 | `filter` | keeps values that pass a test | `ignoreElements`, `filterMap`, `partition` |
 | `scan` | accumulates, emitting every state | `timeInterval`, `skipUntil` |
@@ -166,16 +166,31 @@ The same four strategies run through the time family. Applied to `timer(ms)`:
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
 | `combineLatest` | combines the latest value of each input | `combineLatestWith`, `combineLatestAll`, `forkJoin` |
-| `zip` | pairs values by position | `zipWith`, `zipAll` |
-| `withLatestFrom` | adds the other inputs' latest values to each source value | |
+| `zip` | pairs values by position | `zipWith`, `zipAll`, `sequenceEqual` |
 | `race` | follows whichever input emits first | `raceWith` |
-| `sequenceEqual` | compares two sequences value by value | |
 
-Vocabulary on top, together with the concurrency vocabulary: `takeUntil`, `skipUntil`, `forkJoin`,
-`startWith`, `endWith`, `onErrorResumeNext`, `onErrorResumeNextWith`, `partition`.
+Vocabulary on top, together with the concurrency vocabulary: `takeUntil`, `skipUntil`,
+`withLatestFrom`, `sequenceEqual`, `forkJoin`, `startWith`, `endWith`, `onErrorResumeNext`,
+`onErrorResumeNextWith`, `partition`.
+
+Four of those start from a sequence with its end made visible, the values as `some` and then one
+`none` (`ended` in `src/vocabulary/combination.ts`). `takeUntil` and `skipUntil` merge it with the
+notifier. `withLatestFrom` merges the others, tagged, into the ended source and runs a machine that
+keeps each other's latest value and emits on a source value once every slot is filled; the source's
+`none` halts the machine, the others' ends do not matter. `sequenceEqual` zips the two ended
+sequences and asks `every` pair to agree, `none` with `none` included.
+
+`race` stays in the kernel: the losers must be unsubscribed at the winner's first notification, and
+once a synchronous source has won, the later sources are never subscribed. `merge` subscribes every
+input and keeps every inner alive, so a merge-based race would only hide the losers' values and side
+effects (rule 4 of the identity test). A feedback Subject could do it, with more machinery than the
+producer.
 
 `combineLatest` keeps one deliberate difference from RxJS 7: it completes as soon as an input
 completes without a value, since it can never emit after that (RxJS waits for all inputs).
+`sequenceEqual` keeps a second one: RxJS 7.8.2 answers `true` without checking its own leftover
+buffer, so `ab|` compared with `a|` is equal there when the longer side ends last; the zipped
+definition answers `false` as soon as a value is paired with the other side's end.
 
 ### Errors and effects
 
@@ -217,8 +232,9 @@ a current export count. A smaller kernel is still a goal. Further reductions eac
   two base operators went. `NEVER` stays, with the empty producer.
 - **Scheduling** — done, and not by moving them: `observeOn` is `materialize`, `delay` and
   `dematerialize`, `subscribeOn` is a `timer` flattened into the source. Two base operators went.
-- **Combination.** `withLatestFrom`, `race` and `sequenceEqual` may turn out to be compositions,
-  as `takeUntil` and `skipUntil` did.
+- **Combination** — done for two of the three. `withLatestFrom` is a tagged `merge` into a machine
+  and `sequenceEqual` is `zip` of the ended sequences, then `every`; two base operators went.
+  `race` stays: the losers must be unsubscribed at the first notification.
 - **Notifications.** `materialize` and `dematerialize` could count as one primitive pair beside
   `fromMachine`.
 
@@ -262,7 +278,7 @@ Rules that keep the layering intact:
 | `rxjs-fp/time` | `src/vocabulary/time.ts` | done: `delay`, `emitAfter`, `debounceTime`, `throttleTime` and its variants, `throttleTimeWith`, `auditTime`, `sampleTime`, `windowCount`, `windowTime`, `windowTimeEvery`, `windowTimeOrCount`, `windowTimeEveryOrCount`, `observeOn`, `subscribeOn` |
 | `rxjs-fp/values` | `src/vocabulary/values.ts` | done: `as`, `withIndex`, `skip`, `ignoreElements`, `count`, `toArray`, `first`, `last`, `elementAt`, `find`, `findIndex`, `every`, `isEmpty`, `distinctUntilKeyChanged` |
 | `rxjs-fp/creation` | `src/vocabulary/creation.ts` | done: `of`, `EMPTY`, `throwError`, `range`, `interval`, `iif` |
-| `rxjs-fp/combination` | `src/vocabulary/combination.ts` | done: `takeUntil`, `forkJoin`, `startWith`, `endWith`, `onErrorResumeNext`, `combineLatestWith`, `zipWith`, `raceWith`, `onErrorResumeNextWith`, `combineLatestAll`, `zipAll`, `partition` |
+| `rxjs-fp/combination` | `src/vocabulary/combination.ts` | done: `takeUntil`, `skipUntil`, `withLatestFrom`, `sequenceEqual`, `forkJoin`, `startWith`, `endWith`, `onErrorResumeNext`, `combineLatestWith`, `zipWith`, `raceWith`, `onErrorResumeNextWith`, `combineLatestAll`, `zipAll`, `partition` |
 | `rxjs-fp/errors` | `src/vocabulary/errors.ts` | done: `retry`, `times`, `timesWithDelay`, `exponentialBackoff`, `catchTimeout`, `onErrorReturn` |
 | `rxjs-fp/multicast` | `src/vocabulary/multicast.ts` | done: `share`, `shareReplay`, `shareLatest`, `publish`, `publishReplay`, `publishBehavior`, `publishLast` |
 | former outliers | the modules above | done: every operator is now in a family module. Leaf machines (`pairwise`, `skipLast`, `single`, `max`, `min`, `bufferCount`) moved as written; `filterMap`, `skipUntil`, `timeInterval`, `timestamp`, `delayWhen`, `throttle…`, `mergeScan`, `switchScan`, `fromEvent`, `generate`, `empty`, `never` and six buffer operators became compositions |
@@ -331,6 +347,9 @@ Results so far:
 | `EMPTY`, `throwError(f)` | `of()`; `EMPTY`, then `throwIfEmpty(f)` | identical: the error arrives before `subscribe` returns, the factory runs once per subscription, and a factory that throws is itself the error |
 | `observeOn(s, ms)` | `materialize`, `delay(ms, s)`, `dematerialize` | identical, with and without a delay, including a `take` that cancels the scheduled notifications |
 | `subscribeOn(s, ms)` | `timer(ms, s)`, then `mergeMap` into the source | identical, with and without a delay; unsubscribing before the task runs never subscribes the source |
+| `withLatestFrom` | `merge` of the tagged others and the ended source, into a `fromMachine` machine | identical, including synchronous others, which are subscribed before the source |
+| `sequenceEqual` | `zip` of both ended sequences, then `every` | identical on sequences of equal length, and the specification (the value sequences are equal) on all diagrams; on different lengths rxjs-fp answers `false` where RxJS 7.8.2 can answer `true` (deliberate, README) |
+| `race` | `merge` with the winner selected | differs: the losers stay subscribed, and every input is subscribed even after a synchronous winner. Stays in the kernel |
 
 ## The naming style for pipelines
 

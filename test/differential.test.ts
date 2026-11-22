@@ -79,15 +79,34 @@ describe('conditional and mathematical operators match RxJS', () => {
     ours: ({ a }) => a.pipe(fp.map((k) => ({ k })), fp.distinctUntilKeyChanged('k'), fp.map((o) => o.k)),
     theirs: ({ a }) => a.pipe(rx.map((k) => ({ k })), rx.distinctUntilKeyChanged('k'), rx.map((o) => o.k)),
   });
-  prop2(
-    'sequenceEqual',
-    {
-      ours: ({ a, b }) => a.pipe(fp.sequenceEqual(b)),
-      theirs: ({ a, b }) => a.pipe(rx.sequenceEqual(b)),
-    },
-    marbleArb(8, 'ab'),
-    marbleArb(8, 'ab'),
-  );
+  // RxJS 7.8.2 decides `true` without checking its own leftover buffer, so sequences of
+  // different length compare equal there when the longer side's extra value arrives before
+  // the shorter side ends and the longer side ends last (`ab|` against `a|`). rxjs-fp's
+  // zip-based definition is compared with RxJS on diagrams of equal length, with the
+  // specification on all diagrams, and the difference is pinned.
+  const values = (marbles: string): string => marbles.replace(/[^a-z]/g, '');
+  const sameLength = fc.tuple(marbleArb(8, 'ab'), marbleArb(8, 'ab')).filter(([a, b]) => values(a).length === values(b).length);
+  const sequenceEqual = { ours: ({ a, b }) => a.pipe(fp.sequenceEqual(b)), theirs: ({ a, b }) => a.pipe(rx.sequenceEqual(b)) } satisfies Both<'a' | 'b'>;
+  it('sequenceEqual: the same notifications as RxJS on sequences of equal length', () => {
+    fc.assert(
+      fc.property(sameLength, ([a, b]) => same({ a: { marbles: a }, b: { marbles: b } }, sequenceEqual)),
+      { numRuns: RUNS },
+    );
+  });
+  it('sequenceEqual: the answer is whether the two value sequences are equal', () => {
+    fc.assert(
+      fc.property(completingMarbleArb(8, 'ab'), completingMarbleArb(8, 'ab'), (a, b) => {
+        const out = runOurs({ a: { marbles: a }, b: { marbles: b } }, sequenceEqual.ours);
+        expect(out.map((r) => (r.kind === 'N' ? r.value : r.kind))).toEqual([values(a) === values(b), 'C']);
+      }),
+      { numRuns: RUNS },
+    );
+  });
+  it('sequenceEqual: different lengths are unequal, where RxJS 7.8.2 answers true', () => {
+    const inputs = { a: { marbles: '-a-b-|' }, b: { marbles: '-a--|' } };
+    expect(runOurs(inputs, sequenceEqual.ours)).toEqual([{ frame: 4, kind: 'N', value: false }, { frame: 4, kind: 'C' }]);
+    expect(runTheirs(inputs, sequenceEqual.theirs)).toEqual([{ frame: 5, kind: 'N', value: true }, { frame: 5, kind: 'C' }]);
+  });
 });
 
 describe('duration-selector operators match RxJS', () => {
@@ -725,6 +744,41 @@ describe('former outliers match RxJS (identity tests, docs/kernel.md)', () => {
   prop1('subscribeOn with a delay, cut short', {
     ours: ({ a }, s) => a.pipe(fp.subscribeOn(s, 3), fp.take(2)),
     theirs: ({ a }, s) => a.pipe(rx.subscribeOn(s, 3), rx.take(2)),
+  });
+  prop2('withLatestFrom', {
+    ours: ({ a, b }) => a.pipe(fp.withLatestFrom(b), fp.map((t) => t.join(''))),
+    theirs: ({ a, b }) => a.pipe(rx.withLatestFrom(b), rx.map((t) => t.join(''))),
+  });
+  it('withLatestFrom subscribes the others before the source, so synchronous others are ready', () => {
+    same({}, {
+      ours: () => fp.of(1, 2).pipe(fp.withLatestFrom(fp.of('x', 'y')), fp.map((t) => t.join(''))),
+      theirs: () => rx.of(1, 2).pipe(rx.withLatestFrom(rx.of('x', 'y')), rx.map((t) => t.join(''))),
+    });
+  });
+  it('race stays kernel: the losers are unsubscribed at the first notification, later sources are never subscribed after a synchronous winner', () => {
+    const log: string[] = [];
+    const named = (name: string, body: Observable<string>): Observable<string> =>
+      fp.observable<string>((sink) => {
+        log.push(`${name}:subscribe`);
+        const sub = fp.subscribeChild(body, sink);
+        return () => {
+          log.push(`${name}:unsubscribe`);
+          sub.unsubscribe();
+        };
+      });
+    const s = fp.createVirtualScheduler();
+    const at = (ms: number, v: string): Observable<string> => fp.timer(ms, undefined, s).pipe(fp.map(() => v));
+    fp.race(named('slow', at(2, 'slow')), named('fast', at(1, 'fast')), named('never', fp.NEVER)).subscribe({
+      next: (v) => log.push(`out:${v}`),
+      complete: () => log.push('out:|'),
+    });
+    s.flush();
+    expect(log.slice(0, 6)).toEqual(['slow:subscribe', 'fast:subscribe', 'never:subscribe', 'slow:unsubscribe', 'never:unsubscribe', 'out:fast']);
+    expect(log.filter((e) => e.endsWith(':unsubscribe'))).toHaveLength(3);
+    expect(log).toContain('out:|');
+    log.length = 0;
+    fp.race(named('sync', fp.of('x')), named('unreached', fp.NEVER)).subscribe();
+    expect(log).toEqual(['sync:subscribe', 'sync:unsubscribe']);
   });
   it('subscribeOn and observeOn release their scheduled work on unsubscribe', () => {
     const s = fp.createVirtualScheduler();

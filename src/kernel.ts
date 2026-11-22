@@ -36,7 +36,7 @@ export { map, scan, reduce, tap } from './operators/transform.js';
 export { filter, take, takeLast, takeWhile, skipWhile, distinct, distinctUntilChanged } from './operators/filtering.js';
 export { defaultIfEmpty, materialize, dematerialize } from './operators/transform.js';
 export type { Notification } from './operators/transform.js';
-export { throwIfEmpty, sequenceEqual } from './operators/conditional.js';
+export { throwIfEmpty } from './operators/conditional.js';
 
 // Time-based
 export { debounce, throttle, throttleWith, audit, sample, timeout, timeoutFirst, timeoutFirstAndEach } from './operators/time.js';
@@ -55,7 +55,7 @@ export { flatMapWith, scanWith, Merge, Concat, Switch, Exhaust, expand } from '.
 export type { FlattenStrategy } from './operators/flatten.js';
 
 // Combination
-export { combineLatest, zip, withLatestFrom, race } from './operators/combine.js';
+export { combineLatest, zip, race } from './operators/combine.js';
 
 // Errors and effects
 export {

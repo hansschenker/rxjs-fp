@@ -1,5 +1,5 @@
 import { observable, subscribeChild } from '../core/observable.js';
-import type { Observable, Operator, Subscription, ValueOf, ValuesOf } from '../core/types.js';
+import type { Observable, Subscription, ValueOf, ValuesOf } from '../core/types.js';
 import { from } from '../creation/creation.js';
 
 const runAll = <T extends readonly Observable<unknown>[]>(
@@ -94,39 +94,4 @@ export const race = <const T extends readonly Observable<unknown>[]>(...sources:
     }
     return () => subs.forEach((s) => s.unsubscribe());
   });
-
-/**
- * Combines each source value with the latest values of `others`. Source
- * values arriving before every other has emitted are dropped.
- */
-export const withLatestFrom =
-  <A, const T extends readonly Observable<unknown>[]>(...others: T): Operator<A, [A, ...ValuesOf<T>]> =>
-  (source) =>
-    observable<[A, ...ValuesOf<T>]>((sink) => {
-      const n = others.length;
-      const values: unknown[] = new Array(n);
-      const has: boolean[] = new Array(n).fill(false);
-      let ready = 0;
-      const stopOthers = runAll(others, sink, (src, i) =>
-        subscribeChild(src, sink, {
-          next: (v) => {
-            if (!has[i]) {
-              has[i] = true;
-              ready++;
-            }
-            values[i] = v;
-          },
-          complete: () => {},
-        }),
-      );
-      const main = subscribeChild(source, sink, {
-        next: (a) => {
-          if (ready === n) sink.next([a, ...values] as [A, ...ValuesOf<T>]);
-        },
-      });
-      return () => {
-        stopOthers();
-        main.unsubscribe();
-      };
-    });
 
