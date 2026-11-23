@@ -8,7 +8,8 @@ import ts from 'typescript';
  * machinery. Checked on the TypeScript AST (comments and strings ignored).
  *
  * Forbidden: `class`, `this`, `instanceof`, `.prototype`, `extends` in a
- * class sense, and `new` on anything other than platform value types.
+ * class sense, `new` on anything other than platform value types, and `let` at
+ * module scope (mutable state lives inside a producer, see docs §13).
  */
 const ALLOWED_NEW = new Set(['Error', 'TypeError', 'Promise', 'Set', 'Map', 'Array', 'WeakMap', 'WeakSet']);
 
@@ -31,6 +32,9 @@ const violations = (file: string): string[] => {
       const callee = n.expression.getText(src);
       if (!ALLOWED_NEW.has(callee)) out.push(`${at(n)} new ${callee}`);
     }
+    if (ts.isVariableStatement(n) && ts.isSourceFile(n.parent) && (n.declarationList.flags & ts.NodeFlags.Let) !== 0) {
+      out.push(`${at(n)} module-level let`);
+    }
     ts.forEachChild(n, visit);
   };
   visit(src);
@@ -38,7 +42,7 @@ const violations = (file: string): string[] => {
 };
 
 describe('purity guard', () => {
-  it('src/ and examples/ use no class, this, instanceof, prototype or custom `new`', () => {
+  it('src/ and examples/ use no class, this, instanceof, prototype, custom `new` or module-level `let`', () => {
     const all = [...files(join(process.cwd(), 'src')), ...files(join(process.cwd(), 'examples'))].flatMap(violations);
     expect(all).toEqual([]);
   });

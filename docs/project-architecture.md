@@ -1185,24 +1185,36 @@ name parameter makes shadowing a compile error.
 
 A document that claimed this library is "pure" without qualification would be lying. It is pure in a
 precise, checkable sense: **no mutable state is reachable from outside one subscription, except in
-three places that exist to be shared and say so in their names** — Subjects, `share`'s connection,
-and the `queueScheduler` trampoline. Here is the complete inventory.
+three places that exist to be shared and say so in their names** — Subjects, the connection state of
+the multicasting built on them (`share`, `connectable`, `refCount`, and the one-shot subject behind
+`bindCallback`), and the `queueScheduler` trampoline. Here is the inventory: every `let` and every
+`Set`/`Map` in `src/`, test helpers aside.
 
 | What mutates | Where | Lifetime | Why it is safe |
 |---|---|---|---|
 | `closed` flag, finalizer `Set` | `createSubscription` closure | one per subscription | created per execution, reachable only through three closures that enforce the lifecycle |
 | `stopped` flag | `createSink` closure | one per subscription | same, and only ever moves `false → true` |
-| Machine state, `index` | `let` in `fromMachine`'s producer | one per subscription | `step` itself is pure; the cell is written in exactly one statement |
-| `active`, `queue`, `current`, `generation`, `outerDone` | `let`/array in each flattening producer | one per subscription | essential runtime bookkeeping; unreachable from any API |
-| `values`/`has` arrays, `ready`, `completed` | `let`/`Array` in combination producers | one per subscription | same |
-| Timer handles, pending sets | `let`/`Set` in time-operator producers | one per subscription | cancelled by the subscription's finalizers |
-| `attempt`, `current`, `cancelDelay` | `let` in `retry`/`repeat` producers | one per subscription | the recursion's own bookkeeping |
+| `self` | `observable()` | one per Observable record | written once, so `pipe` can refer to the record it belongs to; a deferred constant |
+| Machine `state`, `index`, `halted` | `let` in `fromMachine`'s producer | one per subscription | `step` itself is pure; the cell is written in exactly one statement, and `halted` latches before the pending emissions run (§5) |
+| `index` | `let` in `map` and `filter` | one per subscription | the index handed to the user's function |
+| Iterator cursor and `exhausted`, `timer`'s `n` and cancel handle, `scheduled`'s iterator, `unfold`'s running seed, `generate`'s per-iteration `state` | `let` in creation producers | one per subscription | a producer's own position in what it is producing; the cancel handle is returned as the teardown |
+| `active`, `index`, `outerDone`, `current`, `generation`, the `queue` array; `scanWith`'s `state` | `let`/array in each flattening producer | one per subscription | essential runtime bookkeeping; unreachable from any API |
+| `values`/`has` arrays, `ready`, `completed`; `race`'s `winner` | `let`/`Array` in combination producers | one per subscription | same |
+| `closed`, `sub` | `subscribeInner`, the handle on a duration, closing or notifier stream | one per inner subscription | lets an operator close an inner that is still being subscribed |
+| `has`/`last`, the duration or throttle inner, `sourceDone`; `timeout`'s `seen`, `lastValue`, `phase`, `cancel`, `timerGeneration`, `pendingTimeout` | `let` in time-operator producers | one per subscription | cancelled by the subscription's finalizers |
+| `current` in `catchError`; `retries`, `current`, `failedSynchronously`, `synchronousError` in `retry`; `completedRuns`, `current`, `completedSynchronously` in `repeat` | `let` in the resubscription producers | one per subscription | the recursion's own bookkeeping |
+| `done`/`sub`, `has`/`last`, `finished`/`failure` | `firstValueFrom`, `lastValueFrom`, `toAsyncIterable` (`src/conversion.ts`) | one per call | a Promise or async iterator is a one-shot consumer; the cell dies with it |
 | `clock`, `seq`, sorted `queue` | `createVirtualScheduler` closure | one per scheduler instance | a scheduler *is* a clock; tests create one per test |
 | Observer set, current/buffered values, terminal | `makeSubject` closure | shared **by design** | sharing is the documented purpose of a Subject |
-| `subject`, `connection`, `refCount`, `terminated` | `share`'s operator closure | shared across that operator's subscribers | that is precisely what `share` means |
-| Open buffers/windows, chunk timers | `let`/array in each `buffer*`/`window*` producer | one per subscription | chunk bookkeeping; the emitted windows are Subjects exposed only through `asObservable()` |
-| `groups` map, `activeGroups`, `outerGone` | `groupBy`'s producer closure | one per subscription, shared between the outer subscriber and every group | the coupling is deliberate and lives in one named function, `maybeDisconnect` |
+| `subject`, `connection`, `resetConnection`, `refCount`, `hasErrored`, `hasCompleted` | `share`'s operator closure | shared across that operator's subscribers | that is precisely what `share` means |
+| `subject`, `connection`; `count`, `connection` | `connectable`'s and `refCount`'s closures | shared across that connectable's subscribers | explicit connection is the point; the source comment says "shared by design" |
+| `subject`, `called` | `bindCallback`'s bound function | one per call, shared by every subscriber of its result | the callback runs once and its AsyncSubject replays the answer, as in RxJS |
+| Open buffers/windows, the closing inner, the `Set` of open closings | `let`/array in each `buffer*`/`window*` producer | one per subscription | chunk bookkeeping; the emitted windows are Subjects exposed only through `asObservable()` |
+| `groups` map, `activeGroups`, `outerGone`; `ended`, `sub` per group | `groupBy`'s producer closure | one per subscription, shared between the outer subscriber and every group | the coupling is deliberate and lives in one named function, `maybeDisconnect` |
 | Action queue, `running` flag | `createQueueScheduler` closure | **module-global** for the exported `queueScheduler` | a trampoline is a shared run loop by definition; create your own with `createQueueScheduler()` if you need isolation |
+
+No `let` is declared at module scope anywhere in `src/` or `examples/`, and the purity test rejects one
+(§14), so the claim at the top of this section is a test rather than a convention.
 
 Two honest caveats a careful reader will spot:
 
@@ -1212,9 +1224,10 @@ Two honest caveats a careful reader will spot:
   hazards, no identity for `instanceof`). The win is in what is *absent*, not in the absence of
   objects as such.
 - **Object identity is used as a key.** `makeSubject` keeps a `Set<Sink<A>>`, `distinct` keeps a
-  `Set<K>`, `fromSubscribable` and `fromEvent` keep `Map`s of removers, and the virtual scheduler
-  mutates `entry.cancelled` in place. Reference equality is load-bearing in those places. That is
-  ordinary and fine, but it is not "value semantics all the way down".
+  `Set<K>`, `fromSubscribable` keeps a `Map` of removers, `groupBy` a `Map` of groups under the
+  user's key, `windowToggle` a `Set` of open closings, and the virtual scheduler mutates
+  `entry.cancelled` in place. Reference equality is load-bearing in those places. That is ordinary
+  and fine, but it is not "value semantics all the way down".
 
 ---
 
@@ -1232,6 +1245,7 @@ defeated by formatting:
 | `BinaryExpression` with `InstanceOfKeyword` | `x instanceof Y` |
 | `PropertyAccessExpression` named `prototype` | `.prototype` fiddling |
 | `NewExpression` whose callee is not allow-listed | `new` on a custom type |
+| `VariableStatement` declared with `let` whose parent is the source file | module-level mutable state, which §13 says does not exist |
 
 The allow-list is the point of calibration:
 

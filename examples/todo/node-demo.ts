@@ -6,7 +6,7 @@
  * User actions are simulated by pushing into Subjects (the "event
  * sources"); everything between the subjects and the console is pure.
  */
-import { createSubject, createVirtualScheduler } from '../../src/index.js';
+import { createSubject, createVirtualScheduler, map } from '../../src/index.js';
 import { intents, loadEffect, memoryStorage, model$, persistEffect } from './src/app.js';
 import type { Filter, Todo } from './src/model.js';
 import { viewText } from './src/view.js';
@@ -26,8 +26,7 @@ const model = model$(
   intents({ add$, select$, rename$, toggle$, remove$, clearCompleted$, setFilter$, loaded$: loadEffect(storage) }),
 );
 
-let step = 0;
-const sub = model.subscribe((m) => console.log(`\n── ${step++} ──\n${viewText(m)}`));
+const sub = model.pipe(map((m, render) => `\n── ${render} ──\n${viewText(m)}`)).subscribe((text) => console.log(text));
 const saving = persistEffect(model, storage, 300, scheduler).subscribe();
 
 add$.next('Write chapter: LINQ → Rx.NET'); //          C

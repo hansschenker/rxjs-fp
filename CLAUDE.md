@@ -1,6 +1,6 @@
 # rxjs-fp — notes for Claude
 
-- Pure FP RxJS in TypeScript. In `src/` and `examples/`: no `class`, `this`, `instanceof`, `.prototype`, or `new` on custom types. `test/purity.test.ts` enforces this on the AST.
+- Pure FP RxJS in TypeScript. In `src/` and `examples/`: no `class`, `this`, `instanceof`, `.prototype`, `new` on custom types, or `let` at module scope. `test/purity.test.ts` enforces this on the AST.
 - Mutable state only inside the per-subscription shell (`let` in an `observable(sink => …)` producer). Stateful operators go through `fromMachine` with pure `step`/`flush`.
 - Operators subscribe upstream with `subscribeChild(source, sink, handlers)` — never `source.subscribe(...)` inside an operator (it links teardown and routes exceptions to `error`).
 - Time-based code takes a `Scheduler` argument; never patch globals.
