@@ -84,15 +84,20 @@ const makeSubject = <A>(hooks: {
     for (const o of snapshot) o.complete();
   };
 
-  const asObservable = (): Observable<A> => observable<A>((sink) => subscribeChild(obs, sink));
+  // like RxJS 7: subscribing to a disposed subject throws synchronously,
+  // directly and through the asObservable view
+  const guarded = (view: Observable<A>): Observable<A> =>
+    Object.freeze({
+      ...view,
+      subscribe: (o?: Parameters<Observable<A>['subscribe']>[0]) => {
+        check();
+        return view.subscribe(o);
+      },
+    });
+  const asObservable = (): Observable<A> => guarded(observable<A>((sink) => subscribeChild(obs, sink)));
 
   const subject: Subject<A> = Object.freeze({
-    ...obs,
-    // like RxJS 7: subscribing to a disposed subject throws synchronously
-    subscribe: (o?: Parameters<Observable<A>['subscribe']>[0]) => {
-      check();
-      return obs.subscribe(o);
-    },
+    ...guarded(obs),
     next,
     error,
     complete,

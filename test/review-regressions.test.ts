@@ -250,6 +250,21 @@ describe('smaller semantic fixes', () => {
     expect(isObjectUnsubscribedError(caught)).toBe(true);
   });
 
+  it('the asObservable view of a disposed Subject throws synchronously too, like RxJS', () => {
+    const s = createSubject<number>();
+    s.dispose();
+    let caught: unknown;
+    try {
+      s.asObservable().subscribe();
+    } catch (e) {
+      caught = e;
+    }
+    expect(isObjectUnsubscribedError(caught)).toBe(true);
+    const native = new R.Subject<number>();
+    native.unsubscribe();
+    expect(() => native.asObservable().subscribe()).toThrow(R.ObjectUnsubscribedError);
+  });
+
   it('first accepts null as predicate with a default', () => {
     expect(collect(EMPTY.pipe(first(null, 'd')))).toEqual(['d', '|']);
   });

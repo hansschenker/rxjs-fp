@@ -927,57 +927,116 @@ Every variant is now `makeSubject` plus a different pair of closures over its ow
 instructive: it composes *two* subjects, an inner one used purely to track the terminal state and an
 outer one that does the delivering. Composition where RxJS used an override.
 
-Three invariants in `makeSubject` are worth naming:
+Four invariants in `makeSubject` are worth naming:
 
-- **`check()` throws `objectUnsubscribedError()`** on every operation after `dispose()`, including
-  `subscribe` — matching RxJS 7, which throws synchronously there.
+- **After `dispose()`, `next`, `error`, `complete` and `subscribe` throw `objectUnsubscribedError()`**,
+  and `subscribe` throws synchronously, matching RxJS 7. The synchronous throw comes from `guarded`
+  (line 89), a wrapper around `subscribe`, not from the `check()` inside the producer: `observable()`
+  routes a throwing producer to `sink.error` (§3), so only a wrapper outside the producer can reach the
+  caller. The `asObservable` view is wrapped the same way. `createAsyncSubject` keeps RxJS's one
+  exception: its `next` after `dispose()` is silent, since it only records the value.
 - **Terminal state is remembered** as a tagged value, `{ kind: 'E', error } | { kind: 'C' } | null`,
   and a late subscriber is replayed the terminal notification immediately rather than being added to
   the observer set.
 - **Delivery iterates a snapshot** — `for (const o of Array.from(observers))` — so an observer that
   subscribes or unsubscribes during delivery cannot corrupt the iteration. This is the re-entrancy
   hazard that a `Set` being mutated mid-notification would otherwise cause.
+- **Registration precedes replay, and replay precedes the terminal notification.** The producer adds
+  the sink to `observers` (line 52) before calling `onSubscribe` (line 56), so a re-entrant `next`
+  during a ReplaySubject's replay also reaches the newcomer. And `onSubscribe` runs before the
+  terminal replay (lines 57-60), so a completed ReplaySubject still delivers its buffer before
+  completing — the ordering `shareReplay`'s completed cache relies on (`test/policies-sharing.test.ts`,
+  the reentrant-delivery and completed-cache cases).
 
 ### `share`: the cold-to-hot boundary, with the ordering that matters
 
-`share` is where several of the earlier mechanisms have to cooperate, and the comments in the source
-mark the two orderings that were hardened after review:
+`share` is where several of the earlier mechanisms have to cooperate. Since 0.2.0 it is one
+interpreter over a policy record (`src/subject/subject.ts:248`):
 
 ```ts
-refCount++;
-// Registered first, so it also runs when a synchronous source makes
-// the downstream close while we are still connecting.
-sink.add(() => {
-  refCount--;
-  if (refCount === 0 && resetOnRefCountZero && !terminated) reset();
+export type ResetPolicy<Args extends unknown[]> =
+  | Readonly<{ kind: 'keep-state' }>
+  | Readonly<{ kind: 'reset-now' }>
+  | Readonly<{ kind: 'reset-on-next'; signal: (...args: Args) => Signal }>;
+
+export type SharePolicy<A> = Readonly<{
+  connector: () => Subject<A>;
+  onError: ResetPolicy<[error: unknown]>;
+  onComplete: ResetPolicy<[]>;
+  onNoSubscribers: ResetPolicy<[]>;
+}>;
+```
+
+A `ResetPolicy` is a sum: keep the session, discard it now, or discard it when a signal
+Observable first emits. `startReset` (line 277) is the only place the three alternatives are
+told apart, and `assertNever` turns a fourth alternative into a compile error. `SharePolicy`
+is the product of a connector and three independent decisions. RxJS 7's `ShareConfig` carries
+the same information as `boolean | () => ObservableInput` fields; naming the alternatives
+makes them a closed set.
+
+The per-subscriber producer (line 349):
+
+```ts
+return observable<A>((sink) => {
+  refCount++;
+  if (!hasErrored && !hasCompleted) cancelReset(); // a returning observer cancels a pending idle reset
+
+  const destination = (subject ??= connector());
+  // Register before replay or source connection so synchronous take(1)
+  // also closes the upstream connection without leaking a reference.
+  sink.add(() => {
+    refCount--;
+    if (refCount === 0 && !hasErrored && !hasCompleted) {
+      resetConnection = startReset(resetAndDisconnect, onNoSubscribers);
+    }
+  });
+  subscribeChild(destination, sink);
+
+  if (connection === null && refCount > 0) {
+    const active = createSubscription();
+    connection = active;                 // assigned BEFORE the source runs
+    subscribeWithin(source, active, { /* next/error/complete into destination */ });
+  }
 });
-const s = (subject ??= connector());
-subscribeChild(s, sink);
-if (connection === null && !terminated && !sink.closed) {
-  const conn = createSubscription();
-  connection = conn;                 // assigned BEFORE the source runs
-  subscribeWithin(source, conn, { /* next/error/complete into s */ });
-}
 ```
 
-First, the ref-count decrement is registered as a finalizer *before* connecting, so a synchronous
-source that completes the downstream during connection still decrements correctly. Second,
-`connection` is assigned before `subscribeWithin` runs the source, so a re-entrant subscriber arriving
-during that synchronous run sees a non-null `connection` and does not open a second one. And
-`subscribeWithin` (§3.3) is used rather than a bare `subscribe` so that closing the connection scope
-stops even a synchronous source.
+Three orderings matter. First, the ref-count decrement is registered as a finalizer *before*
+the Subject replays or the source connects, so a replayed value that synchronously closes the
+only subscriber (`take(1)` behind a `BehaviorSubject` connector) brings the count back to zero
+before the connection check, and `refCount > 0` then prevents a connection nobody would hear.
+Second, `connection` is assigned before `subscribeWithin` runs the source, so a re-entrant
+subscriber arriving during that synchronous run sees a non-null `connection` and does not open
+a second one. Third, `subscribeWithin` (§3.3) is used rather than a bare `subscribe` so that
+closing the connection scope stops even a synchronous source.
 
-The code above is the internal `shareCore`, and the public operators choose its reset flags through
-a lifecycle value: `WhileSubscribed` (start over after an error, after completion, and when the last
-subscriber leaves) or `Cached` (start over only after an error). `shareReplay` is then not a separate
-implementation but a choice of connector and lifecycle:
+Every call into the connector's Subject is wrapped in `reportCallbackError` (line 269). The
+Subject belongs to the caller and may have been disposed, and the shared connection has no
+downstream error channel of its own, so what it throws is reported on a fresh stack (§8)
+instead of tearing down the connection.
+
+The named operators are choices of policy, not separate implementations:
 
 ```ts
-export const shareReplay = <A>(bufferSize = Number.POSITIVE_INFINITY): Operator<A, A> =>
-  shareWith<A>(() => createReplaySubject<A>(bufferSize), Cached);
+export const shareReplay = <A>(
+  policy: ShareReplayPolicy = defaultShareReplayPolicy(),
+  scheduler: Scheduler = asyncScheduler,
+): Operator<A, A> => {
+  const count = replayBound(policy.replay.maxValues);
+  const age = replayBound(policy.replay.maxAge);
+  return share<A>({
+    connector: () => createReplaySubject<A>(count, age, scheduler),
+    onError: { kind: 'reset-now' },
+    onComplete: { kind: 'keep-state' },
+    onNoSubscribers: idleReset(policy.onNoSubscribers),
+  });
+};
 ```
 
-Policy as data again — the same move as `FlattenStrategy`, applied to multicasting.
+`shareWith(connector, lifecycle)` maps the two-value `ShareLifecycle` (`WhileSubscribed`,
+`Cached`) onto the same record (line 466), and `shareLatest` is `share` with a one-value
+`ReplaySubject` (`src/vocabulary/multicast.ts:58`). Policy as data again — the same move as
+`FlattenStrategy`, applied to multicasting. Current signatures are in
+[Algebraic operator policies](algebraic-policies.md).
 
 ---
 
