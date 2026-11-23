@@ -86,6 +86,7 @@
     "example:todo": "vite examples/todo/browser",
     "example:todo:node": "tsx examples/todo/node-demo.ts",
     "example:users": "tsx examples/users/demo.ts",
+    "example:search": "tsx examples/search/demo.ts",
     "example:policies": "node --import tsx examples/policies/demo.ts"
   },
   "engines": {

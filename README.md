@@ -72,7 +72,7 @@ import { delay, debounceTime } from 'rxjs-fp/time';
 
 The families are `rxjs-fp/kernel`, `/creation`, `/values`, `/time`, `/concurrency`, `/combination`, `/errors` and `/multicast`.
 
-A small end-to-end sample in this style is in [examples/users](examples/users): a pipeline of named decisions (`users.ts`), a real-time demo with a fake service (`npm run example:users`), and the same code tested in virtual time (`users.test.ts`).
+A small end-to-end sample in this style is in [examples/users](examples/users): a pipeline of named decisions (`users.ts`), a real-time demo with a fake service (`npm run example:users`), and the same code tested in virtual time (`users.test.ts`). A second one is [examples/search](examples/search): search-as-you-type against a service that is sometimes down and sometimes silent, with a timeout policy, a retry policy and a shared replay, run and tested frame by frame on a virtual clock (`npm run example:search`, `search.test.ts`).
 
 The library source must not contain `class`, `this`, `instanceof`, `.prototype` or `new` on custom types. A test checks this on the TypeScript AST (`test/purity.test.ts`).
 
@@ -86,6 +86,7 @@ npm run build        # dist/ (ESM + .d.ts)
 npm run example:todo # Todo CRUDL example in the browser (Vite)
 npm run example:todo:node
 npm run example:policies # all six policy families on explicit virtual time
+npm run example:search   # search-as-you-type on a virtual clock, frame by frame
 ```
 
 Entry points: `rxjs-fp` (core and operators), `rxjs-fp/fp` (Option, Either, typeclasses, do-notation), `rxjs-fp/testing` (marbles, virtual time).
