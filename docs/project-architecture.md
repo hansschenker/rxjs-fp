@@ -1253,13 +1253,25 @@ The allow-list is the point of calibration:
 const ALLOWED_NEW = new Set(['Error', 'TypeError', 'Promise', 'Set', 'Map', 'Array', 'WeakMap', 'WeakSet']);
 ```
 
-Every `new` in `src/` today is one of those eight. The distinction being drawn is not "no mutable
-containers" — `Set` and `Map` are used freely — but **no user-defined types with identity and
-inheritance**. `new Set()` creates a data structure; `new MergeMapSubscriber()` creates a participant
-in a type hierarchy. The first is a container, the second is an architecture.
+Every `new` in `src/` today is one of those eight; six of them appear (`Error`, `Set`, `Promise`,
+`Map`, `TypeError`, `Array`), and `WeakMap` and `WeakSet` are allowed but unused. The distinction
+being drawn is not "no mutable containers" — `Set` and `Map` are used freely — but **no user-defined
+types with identity and inheritance**. `new Set()` creates a data structure;
+`new MergeMapSubscriber()` creates a participant in a type hierarchy. The first is a container, the
+second is an architecture.
+
+The guard checks syntax, not semantics. `Object.create`, `Object.setPrototypeOf` and
+`Reflect.construct` would build a prototype chain without any rejected node, and `.bind`, `.call`
+and `.apply` would bind `this` without the keyword. None of them appears in `src/` or `examples/`.
+The test is a guard against habit, not against intent: it makes the easy, idiomatic way of writing a
+class impossible to commit by accident.
 
 The test runs in `npm run check` and in CI on Node 20 and 22, so the invariant is enforced on every
 commit rather than remembered.
+
+The other architectural rule with a test behind it is the layering of kernel and vocabulary
+described in [docs/kernel.md](kernel.md): `test/layering.test.ts` checks that no kernel module
+imports a vocabulary module, and that each family module and the root export the same functions.
 
 ---
 
