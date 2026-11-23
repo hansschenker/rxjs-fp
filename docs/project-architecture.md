@@ -1111,9 +1111,10 @@ export interface Functor<F extends URIS> {
 ```
 
 An instance is then an object literal, and new types join the registry by module augmentation —
-open-world extension without subclassing. `Filterable` is declared as `extends Functor<F>,
-Compactable<F>`, which is interface composition, not class inheritance: no implementation is
-inherited, only the obligation to supply the members.
+open-world extension without subclassing. Two-parameter constructors have their own registry:
+`Either<E, A>` is registered in `URItoKind2` and reached through `Kind2` (`src/fp/hkt.ts:14-21`).
+`Filterable` is declared as `extends Functor<F>, Compactable<F>`, which is interface composition,
+not class inheritance: no implementation is inherited, only the obligation to supply the members.
 
 ### The instances, and what was left out
 
@@ -1122,6 +1123,10 @@ inherited, only the obligation to supply the members.
 | `ObservableFunctor` | `map` | lawful |
 | `ObservableCompactable` / `ObservableFilterable` | `compact`, `separate`, `filter`, `filterMap`, `partition`, `partitionMap` | lawful |
 | `getMergeMonoid` / `getConcatMonoid` | `concat = merge` or `concat`, `empty = EMPTY` | lawful |
+
+`partition`, `partitionMap` and `separate` return a `Separated` pair of two Observables that each
+subscribe to the source (`src/fp/observable.ts:53`). That is §10's rule seen from the fp side: no
+shared box appears unless asked for, so a source with effects must be shared before it is split.
 
 **Left out on purpose:** the Monad, Applicative and Alternative instances (`MonadMerge`,
 `MonadConcat`, `ObservablePlus`, `ObservableAlternative`) and the operators `ap`, `apLatest`, `alt`
@@ -1150,19 +1155,29 @@ observe the index — the classic `['1','2','3'].map(parseInt)` bug — and woul
 composition law. Every instance member therefore wraps its function to drop the extra argument.
 
 **The `concatMap` timing edge case**, stated precisely, with `chain` = `concatMap`: in
-`chain(chain(m, f), g)` the `g`-inners of one `f(x)` can overlap the next `f(x)`; in
-`chain(m, x => chain(f(x), g))` they cannot. Both sides emit the same values in the same order, but
-not always at the same virtual frames, and an error can make that difference observable. `mergeMap`
-has no such gap. The law test for `concatMap` therefore compares notification *sequences* on
-error-free streams, while `mergeMap` is checked frame-for-frame.
+`chain(chain(m, f), g)` the `g`-inners of one `f(x)` can overlap the next `f(x)`; in `chain(m, x =>
+chain(f(x), g))` they cannot. Both sides emit the same values in the same order, but not always at
+the same virtual frames, and an error can make that difference observable. `mergeMap` has no such
+gap. The law test for `concatMap` therefore compares notification *sequences* on error-free streams,
+while `mergeMap` is checked at the same frames, with simultaneous events compared as a multiset
+(`sameUpToSimultaneity`), since `merge` gives no order between them.
 
-`Option` and `Either` are tagged unions (`{ _tag: 'Some', value }` / `{ _tag: 'None' }`), discriminated
-by `_tag` rather than by class — the same technique as `FlattenStrategy`, applied to data instead of
-policy. The do-notation is plain functions threading a record through `chain`: `Do` is `of({})`,
-`bind(name, f)` chains and spreads the result into the scope object, and `let_(name, f)` does the same
-with `map` for a pure step. Type-level, each returns
-`{ readonly [K in keyof A | N]: K extends keyof A ? A[K] : B }`, so the growing scope record stays
-precisely typed — and `Exclude<N, keyof A>` on the name parameter makes shadowing a compile error.
+`Option` and `Either` are tagged unions (`{ _tag: 'Some', value }` / `{ _tag: 'None' }`),
+discriminated by `_tag` rather than by class — the same technique as `FlattenStrategy`, applied to
+data instead of policy.
+
+`Option` and `Either` cross into streams through four small functions
+(`src/fp/observable.ts:96-112`). `fromOption` sends `none` to `EMPTY`, and `fromEither` sends `left`
+to the error channel, so an absent value is an empty stream and a failure is an error. `attempt`
+goes the other way, moving an error out of the error channel into the value channel as a final
+`left`, and `rethrow` inverts it. This is §11's "errors as values" extended from the error object
+itself to its position in the stream.
+
+The do-notation is plain functions threading a record through `chain`: `Do` is `of({})`, `bind(name,
+f)` chains and spreads the result into the scope object, and `let_(name, f)` does the same with
+`map` for a pure step. Type-level, each returns `{ readonly [K in keyof A | N]: K extends keyof A ?
+A[K] : B }`, so the growing scope record stays precisely typed — and `Exclude<N, keyof A>` on the
+name parameter makes shadowing a compile error.
 
 ---
 

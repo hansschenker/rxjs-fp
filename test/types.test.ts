@@ -80,6 +80,10 @@ describe('static types', () => {
     of(1).pipe(map((s: string) => s.length));
     // @ts-expect-error forwarding numbers into a string sink without a `next` handler
     observable<string>((sink) => subscribeChild(of(1), sink));
+    // @ts-expect-error a do-notation step cannot shadow a name already in scope
+    Do.pipe(bind('a', () => of(1)), bind('a', () => of('x')));
+    // @ts-expect-error nor can a pure step
+    Do.pipe(bind('a', () => of(1)), let_('a', () => 'x'));
   });
 
   it('Option is a tagged union', () => {
