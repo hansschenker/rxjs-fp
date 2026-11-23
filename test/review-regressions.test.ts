@@ -24,6 +24,11 @@ import {
   throttleTimeLeadingAndTrailing,
   unfold,
   type Observable,
+  isEmptyError,
+  isNotFoundError,
+  isSequenceError,
+  isTimeoutError,
+  isUnsubscriptionError,
 } from '../src/index.js';
 import { some } from '../src/fp/index.js';
 import { record } from '../src/testing/index.js';
@@ -263,6 +268,17 @@ describe('smaller semantic fixes', () => {
     const native = new R.Subject<number>();
     native.unsubscribe();
     expect(() => native.asObservable().subscribe()).toThrow(R.ObjectUnsubscribedError);
+  });
+
+  it('the name-based guards recognise RxJS 7 error instances too', () => {
+    expect(isEmptyError(new R.EmptyError())).toBe(true);
+    expect(isArgumentOutOfRangeError(new R.ArgumentOutOfRangeError())).toBe(true);
+    expect(isObjectUnsubscribedError(new R.ObjectUnsubscribedError())).toBe(true);
+    expect(isTimeoutError(new R.TimeoutError())).toBe(true);
+    expect(isNotFoundError(new R.NotFoundError('No matching values'))).toBe(true);
+    expect(isSequenceError(new R.SequenceError('Too many matching values'))).toBe(true);
+    expect(isUnsubscriptionError(new R.UnsubscriptionError([]))).toBe(true);
+    expect(isEmptyError(new R.TimeoutError())).toBe(false);
   });
 
   it('first accepts null as predicate with a default', () => {

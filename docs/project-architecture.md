@@ -1042,9 +1042,10 @@ export const shareReplay = <A>(
 
 ## 11. Errors as tagged values, not subclasses
 
-RxJS ships `EmptyError`, `ArgumentOutOfRangeError`, `ObjectUnsubscribedError`, `TimeoutError` and
-`UnsubscriptionError` as classes, and you discriminate them with `instanceof`. Here they are built by
-a factory of factories:
+RxJS ships `EmptyError`, `ArgumentOutOfRangeError`, `ObjectUnsubscribedError`, `TimeoutError`,
+`NotFoundError`, `SequenceError` and `UnsubscriptionError` as constructors with a prototype chain
+to `Error` (built by `createErrorClass`), and you discriminate them with `instanceof`. Here they
+are built by a factory of factories:
 
 ```ts
 const tagged =
@@ -1062,8 +1063,20 @@ const is =
 preserved. The guards are `name`-based type predicates, which gives TypeScript the same narrowing
 `instanceof` would — and is in one respect strictly better: `instanceof` fails across realms
 (iframes, worker boundaries, two copies of a library in one bundle), while a `name` comparison does
-not. The same pattern produces `UnsubscriptionError` in `src/core/subscription.ts:14`, with its extra
-`errors` array.
+not.
+
+The guards are duck-typed, and that cuts both ways. Every `is*` guard also recognises RxJS 7's own
+instances, whose names and default messages agree, so a pipeline that mixes the two libraries can
+discriminate either's errors. In exchange, anything named `TimeoutError` passes `isTimeoutError`
+and is then typed as carrying `info`; nominal identity is exactly what was given up.
+
+Two errors carry a payload and are therefore spelled out rather than produced by `tagged`:
+`timeoutError(info)` (`src/core/errors.ts:40`) attaches `info` with `seen`, `lastValue` and `meta`
+— `meta` arrived with the 0.2.0 timeout policies, and an overload fills it with `null` for callers
+without metadata — and `unsubscriptionError(errors)` (`src/core/subscription.ts:14`) attaches the
+finalizer exceptions. Error values also compose with the machine shell of §5: `single`
+(`src/vocabulary/values.ts:279`) returns `flushError(notFoundError())` as data from `flush`, and a
+`step` that must fail throws `sequenceError()`, which the shell routes to `error`.
 
 ---
 
