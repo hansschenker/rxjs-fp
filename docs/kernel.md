@@ -111,16 +111,17 @@ the kernel's types. `observeOn` is built on the pair.
 ### Time-based
 
 The kernel takes its criterion as an Observable or a function. Each `…Time` operator is the
-vocabulary version with a timer, and each buffer operator but one is its window counterpart with
-every window collected into an array.
+vocabulary version with a timer, and each buffer operator but two is its window counterpart with
+every window collected into an array (`collected`); the two, `bufferWhen` and `bufferCount`, are
+explained below.
 
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
 | `debounce` | emits a value after a quiet period | `debounceTime` |
-| `throttle(selector, mode)` | selects leading, trailing, both or suppressed emissions per signal window | `throttleWith`, `throttleTime` and their named variants |
+| `throttle(selector, mode)` | selects leading, trailing, both or suppressed emissions per signal window; `throttleWith(mode)` is the kernel's own specialization | `throttleTime`, `throttleTimeWith` and the named variants (`throttleTrailing`, `throttleLeadingAndTrailing`, `throttleTime…`) |
 | `audit` | emits the latest value at the end of each window | `auditTime` |
 | `sample` | emits the latest value when a notifier fires | `sampleTime` |
-| `timeout(policy, scheduler)` | interprets first/gap deadlines and error/fallback outcomes | `timeoutFirst`, `timeoutFirstAndEach`; `catchTimeout` handles a timeout error |
+| `timeout(policy, scheduler)` | interprets first/gap deadlines and error/fallback outcomes; `timeoutFirst` and `timeoutFirstAndEach` are the kernel's own specializations | `catchTimeout` handles a timeout error |
 | `window` | chunks of values as Observables, closed by a notifier | `buffer` |
 | `windowToggle` | a chunk per opening, closed by its own closing | `windowCount`, `windowTimeEvery`, `windowTimeEveryOrCount`, `bufferToggle` |
 | `windowWhen` | back-to-back chunks by a closing factory | `windowTime`, `windowTimeOrCount` |
