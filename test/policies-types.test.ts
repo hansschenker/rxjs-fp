@@ -119,6 +119,16 @@ describe('algebraic policy static contracts', () => {
     expect(time.timeout).toBe(fp.timeout);
   });
 
+  it('a default timeout error policy kept in a constant needs its type argument; inline it is inferred', () => {
+    const timing = { kind: 'each-gap', duration: fp.positiveMilliseconds(5) } as const;
+    // stored in a constant there is no contextual type, so A defaults to unknown and widens the stream
+    const stored = fp.defaultTimeoutErrorPolicy(timing);
+    expectTypeOf(fp.of(1).pipe(fp.timeout(stored))).toEqualTypeOf<fp.Observable<unknown>>();
+    // the fix is on the user side: name the value type (examples/search/search.ts does)
+    const typed = fp.defaultTimeoutErrorPolicy<number>(timing);
+    expectTypeOf(fp.of(1).pipe(fp.timeout(typed))).toEqualTypeOf<fp.Observable<number>>();
+  });
+
   it('a timeout fallback adds B and receives precisely typed metadata and source history', () => {
     type Meta = Readonly<{ requestId: string; retryable: boolean }>;
     const policy: fp.TimeoutSwitchPolicy<number, string, Meta> = {

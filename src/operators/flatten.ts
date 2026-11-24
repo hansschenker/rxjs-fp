@@ -21,10 +21,14 @@ export type FlattenStrategy =
   | { readonly _tag: 'Switch' }
   | { readonly _tag: 'Exhaust' };
 
-/** A concurrency limit: a positive integer, or `Infinity` for none. Anything else throws at construction. */
-const concurrency = (value: number): number => (value === Number.POSITIVE_INFINITY ? value : positiveInteger(value));
+/**
+ * A concurrency limit: a positive integer, or none when omitted. Anything
+ * else throws at construction — an explicit `Infinity` included, since the
+ * 0.2.0 policies name an unlimited bound by leaving it out, never by a number.
+ */
+const concurrency = (value?: number): number => (value === undefined ? Number.POSITIVE_INFINITY : positiveInteger(value));
 
-export const Merge = (concurrent: number = Number.POSITIVE_INFINITY): FlattenStrategy =>
+export const Merge = (concurrent?: number): FlattenStrategy =>
   Object.freeze({ _tag: 'Merge', concurrent: concurrency(concurrent) });
 export const Concat: FlattenStrategy = Merge(1);
 export const Switch: FlattenStrategy = Object.freeze({ _tag: 'Switch' });
@@ -106,7 +110,7 @@ export const flatMapWith =
  * Recursively projects every value: each emitted value is also fed back
  * into `project`. Emits all results; completes when nothing is left.
  */
-export const expand = <A>(project: (value: A, index: number) => ObservableInput<A>, concurrent: number = Number.POSITIVE_INFINITY): Operator<A, A> => {
+export const expand = <A>(project: (value: A, index: number) => ObservableInput<A>, concurrent?: number): Operator<A, A> => {
   const limit = concurrency(concurrent);
   return (source) =>
     observable<A>((sink) => {

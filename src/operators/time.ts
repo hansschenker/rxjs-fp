@@ -84,7 +84,12 @@ export const deadlineAt = (date: Date): Deadline => Object.freeze({
   epochMillis: epochMilliseconds(date.getTime()),
 });
 
-/** Timing is mandatory; there is no empty default timeout. */
+/**
+ * Timing is mandatory; there is no empty default timeout. Inline in a pipe,
+ * `A` is inferred from the source; a policy kept in a constant must name it
+ * (`defaultTimeoutErrorPolicy<Hit[]>(timing)`), or `timeout` widens the
+ * stream to `unknown`.
+ */
 export const defaultTimeoutErrorPolicy = <A = unknown>(timing: TimeoutTiming): TimeoutErrorPolicy<A, null> => Object.freeze({
   timing,
   outcome: Object.freeze({ kind: 'raise-timeout-error' }),

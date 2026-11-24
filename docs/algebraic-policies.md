@@ -317,7 +317,10 @@ const result$ = source$.pipe(timeout(useCache, scheduler)); // Observable<number
 
 `TimeoutErrorPolicy<A, M>` preserves the source value type. `TimeoutSwitchPolicy<A, B, M>`
 and a general `TimeoutPolicy<A, B, M>` produce `A | B`. Metadata stays typed in the fallback.
-`defaultTimeoutErrorPolicy(timing)` selects the error outcome and `meta: null`.
+`defaultTimeoutErrorPolicy(timing)` selects the error outcome and `meta: null`. Its value type
+parameter defaults to `unknown`: inline in a `pipe` it is inferred from the source, but a policy
+kept in a constant must name it — `defaultTimeoutErrorPolicy<Hit[]>(timing)` — or `timeout` widens
+the stream to `Observable<unknown>`.
 `timeoutFirst` and `timeoutFirstAndEach` remain compositions selecting those policies.
 
 `TimeoutInfo` contains `seen`, `lastValue`, and `meta`. rxjs-fp retains its established

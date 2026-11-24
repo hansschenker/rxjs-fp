@@ -217,6 +217,15 @@ describe('flattening strategies', () => {
     expect(isArgumentOutOfRangeError(caught)).toBe(true);
   });
 
+  it('rejects an explicit Infinity too: no limit is the absence of a bound, as in the 0.2.0 policies (RxJS accepts Infinity)', () => {
+    expect(() => Merge(Number.POSITIVE_INFINITY)).toThrowError(/Expected/);
+    expect(() => mergeMap(() => EMPTY, Number.POSITIVE_INFINITY)).toThrowError(/Expected/);
+    expect(() => expand(() => EMPTY, Number.POSITIVE_INFINITY)).toThrowError(/Expected/);
+    // the unlimited forms: omit the argument
+    expect(Merge()).toEqual({ _tag: 'Merge', concurrent: Number.POSITIVE_INFINITY });
+    expect(collect(of(1, 2).pipe(mergeMap((x) => of(x, x))))).toEqual([1, 1, 2, 2, '|']);
+  });
+
   it('an error in the projection goes to error', () => {
     const o = of(1).pipe(
       mergeMap((): never => {

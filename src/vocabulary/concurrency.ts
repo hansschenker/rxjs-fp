@@ -22,8 +22,8 @@ export type { FlattenStrategy } from '../kernel.js';
 
 type Project<A, B> = (value: A, index: number) => ObservableInput<B>;
 
-/** Runs each value's nested work alongside the others, up to `concurrent` at once. */
-export const mergeMap = <A, B>(project: Project<A, B>, concurrent: number = Number.POSITIVE_INFINITY): Operator<A, B> =>
+/** Runs each value's nested work alongside the others, up to `concurrent` at once; omit it for no limit. */
+export const mergeMap = <A, B>(project: Project<A, B>, concurrent?: number): Operator<A, B> =>
   flatMapWith(Merge(concurrent))(project);
 
 /** Runs each value's nested work after the previous one completes, in order. */
@@ -72,7 +72,7 @@ export const concatWith =
 export const mergeScan = <A, S>(
   accumulator: (acc: S, value: A, index: number) => ObservableInput<S>,
   seed: S,
-  concurrent: number = Number.POSITIVE_INFINITY,
+  concurrent?: number,
 ): Operator<A, S> => scanWith(Merge(concurrent))(accumulator, seed);
 
 /** `scan` with an Observable-returning accumulator; a new value cancels the running inner. */

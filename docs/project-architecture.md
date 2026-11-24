@@ -423,8 +423,10 @@ export const Concat: FlattenStrategy = Merge(1);
 
 `Concat` is literally `Merge(1)` — the ordering guarantee is a consequence of a concurrency limit of
 one, and saying so in code is clearer than any comment. The number is validated the way the 0.2.0
-policies are: a positive integer or `Infinity`, anything else throws `ArgumentOutOfRangeError` at
-construction — where RxJS clamps nothing and, handed `NaN`, queues every value forever. One
+policies are: a positive integer, or no argument for no limit; anything else — an explicit `Infinity`
+included, since 0.2.0 names an unlimited bound by leaving it out rather than by a number — throws
+`ArgumentOutOfRangeError` at construction, where RxJS clamps nothing and, handed `NaN`, queues every
+value forever. One
 interpreter, `flatMapWith`, reads the tag and handles an outer value:
 
 | Strategy | On an outer value |
