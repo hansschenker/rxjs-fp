@@ -1376,22 +1376,32 @@ say `new TestScheduler(...)` — which is exactly why it lives there. The marble
 
 ## 17. Adding an operator: the decision procedure
 
-The architecture answers "how do I write this operator?" with a five-way test. In order:
+The architecture answers "how do I write this operator?" with a six-way test. In order:
 
-1. **Stateless?** Write a plain closure over the source — one `observable(sink => subscribeChild(...))`,
-   or build it from existing operators. (`map`, `filter`, `tap`.)
-2. **Stateful, but the state is a value and the logic is a pure function of it?** Write a `Machine`
-   and hand it to `fromMachine`. Test `step` with `runMachine` before any stream exists.
-   (`scan`, `pairwise`, `bufferCount`, `take`, `distinct`.)
-3. **Does it own resources — subscriptions, timers, re-subscription?** Write a producer and use
+1. **Can it be composed?** Try this first. An operator is kernel only if no composition of existing
+   operators reproduces its behaviour exactly — the same values at the same times, the same
+   completion, errors and teardown, and the same resources (`src/kernel.ts:4-7`; the identity test in
+   `docs/kernel.md`). A composition is vocabulary: a definition in `src/vocabulary/<family>.ts` that
+   imports only `../kernel.js` or a sibling, exported from the family module and from the root, with
+   an identity test against RxJS in `test/differential.test.ts`. Only what fails that test gets a
+   producer under `src/operators/` and a line in `src/kernel.ts`. (`switchMap` is
+   `flatMapWith(Switch)`, `debounceTime` is `debounce` over `timer`, `buffer` is `window` collected,
+   `windowCount` is `windowToggle` over ticks.)
+2. **Stateless?** Write a plain closure over the source — one `observable(sink => subscribeChild(...))`.
+   An index counter is allowed and is the only state (§13). (`map`, `filter`, `tap`.)
+3. **Stateful, but the state is a value and the logic is a pure function of it?** Write a `Machine`
+   and hand it to `fromMachine`. Test `step` with `runMachine` before any stream exists. State that
+   has to be a mutable collection — `distinct`'s `Set` of seen keys — stays in the shell instead.
+   (`scan`, `pairwise`, `bufferCount`, `take`, `distinctUntilChanged`, `takeLast`.)
+4. **Does it own resources — subscriptions, timers, re-subscription?** Write a producer and use
    `subscribeChild` for every upstream, never `source.subscribe`. If it involves time, take
    `scheduler: Scheduler = asyncScheduler` as an explicit parameter and never touch a global.
-   (`switchMap`, `debounceTime`, `retry`, `combineLatest`.)
-4. **Is a notifier, duration or closing selector involved?** Subscribe it with `subscribeInner`, not
+   (`flatMapWith`, `retry`, `combineLatest`; `timer` for the scheduler parameter.)
+5. **Is a notifier, duration or closing selector involved?** Subscribe it with `subscribeInner`, not
    `subscribeChild`, and drive the operator off the `Inner` handle it returns — a synchronous
-   duration can end before your subscription variable is assigned. (`debounce`, `audit`, `buffer`,
-   `windowWhen`.)
-5. **Does it emit Observables?** First try to compose `window`, `windowToggle` or `windowWhen`
+   duration can end before your subscription variable is assigned. (`debounce`, `audit`, `sample`,
+   `bufferWhen`, `windowWhen`.)
+6. **Does it emit Observables?** First try to compose `window`, `windowToggle` or `windowWhen`
    (`windowCount` and the `windowTime…` operators are such compositions). Otherwise you need a
    Subject per chunk or per key, handed out through `asObservable()` so consumers cannot push into
    it, and you need to decide explicitly what keeps the source alive — see `groupBy`'s
@@ -1401,12 +1411,15 @@ Then the invariants, each with the place that enforces it:
 
 | Invariant | Enforced by |
 |---|---|
-| No `class`, `this`, `instanceof`, `.prototype`, custom `new` | `test/purity.test.ts` (AST) |
+| No `class`, `this`, `instanceof`, `.prototype`, custom `new`, module-level `let` | `test/purity.test.ts` (AST) |
+| Vocabulary imports only the kernel; the kernel never reaches the vocabulary; family modules and the root export the same functions | `test/layering.test.ts` |
+| Behaviour matches RxJS 7.8 wherever RxJS has the operator | a differential test in `test/differential.test.ts` (§15) |
 | Operators link teardown and route exceptions | use `subscribeChild`, never `source.subscribe` |
 | Stateful logic stays pure | express it as a `Machine`; `step` takes and returns state |
 | Time is injectable | `Scheduler` parameter; no global patching |
+| Policy sums stay closed and exhaustive | `assertNever` in every interpreter `switch` (§16) |
 | New typeclass instances stay lawful | a property test in `test/laws.test.ts` |
-| Imports resolve under NodeNext | `.js` extensions on every relative import |
+| Imports resolve under NodeNext | `.js` extensions on every relative import; `tsc` under `moduleResolution: NodeNext` fails without them |
 
 ---
 
