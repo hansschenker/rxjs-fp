@@ -1,9 +1,11 @@
 # Project architecture: reactive extensions without a single `class`
 
-> **Architecture snapshot: version 0.1.0.** The source excerpts and line references below describe
-> the design before the algebraic policy API introduced in 0.2.0. The closure-based runtime remains;
-> the current `repeat`, `retry`, sharing, throttling and timeout APIs are documented in
-> [Algebraic operator policies](algebraic-policies.md). Use that guide for current signatures.
+> **Verified against the tree.** Every section was re-checked claim by claim against the source
+> between 2026-10-19 and 2026-11-24, at version 0.2.0. Where the algebraic policies of 0.2.0 changed
+> an API — `repeat`, `retry`, `share`, `shareReplay`, `throttle`, `timeout` — the text describes
+> the policy form; the full signatures are in [Algebraic operator policies](algebraic-policies.md).
+> Line references were exact at the commit that last touched their section and drift as the code
+> moves; the file name is the durable pointer.
 
 
 `docs/architecture.md` is the map — which directory holds what, and the execution model in brief.
@@ -526,10 +528,11 @@ plus TypeScript 5's `const` type parameter — `<const T extends readonly Observ
 preserves the tuple literal type at the call site without making callers write `as const`. No classes
 are involved in precise variadic typing; mapped and conditional types do all of it.
 
-The producers in that file — `combineLatest`, `zip`, `race` and `withLatestFrom` — share one helper,
-`runAll`, which subscribes to each source in turn while re-checking `sink.closed`, and returns a
+The producers in that file — `combineLatest`, `zip` and `race` — share one helper, `runAll`,
+which subscribes to each source in turn while re-checking `sink.closed`, and returns a
 teardown that unsubscribes all of them. Their state is a pair of parallel arrays (`values`, `has`)
 plus counters (`ready`, `completed`) — per subscription, in the producer, exactly as §13 inventories.
+`withLatestFrom`, once the fourth producer here, is now a composition in `src/vocabulary/combination.ts`.
 `forkJoin` is not among them: it is vocabulary, `combineLatest` over each source's `takeLast(1)`
 (`src/vocabulary/combination.ts`), and inherits the tuple typing for free.
 
@@ -559,7 +562,8 @@ that started it has been assigned, and the `Inner` handle is how an operator clo
 cannot yet name. The pattern this section used to describe — a `let cancel` holding the current
 scheduled action, replaced when the window restarts and cancelled from the teardown — survives in
 exactly one operator, `timeout` (`src/operators/time.ts:158`), whose deadline really is a scheduled
-action rather than a notifier, and in `subscribeOn`/`observeOn`, which exist only to schedule.
+action rather than a notifier. `subscribeOn` and `observeOn`, which once held one too, are now
+compositions over `timer` and `delay` with no shell code of their own (§8).
 Because the scheduler is a parameter and not a global, every one of these is deterministic under a
 virtual clock — see §8 and §15.
 
@@ -1429,23 +1433,27 @@ Then the invariants, each with the place that enforces it:
 |---|---|---|
 | `class Observable<T>` with `subscribe`/`pipe`/`lift` | `observable(producer)` → frozen record of closures | `src/core/observable.ts` |
 | `class Subscriber<T> extends Subscription` | `createSink(observer, subscription, internal)` | `src/core/observable.ts:89` |
+| `config.onUnhandledError`, consulted before throwing | `reportUnhandledError` rethrows on a fresh task; there is no hook (§3) | `src/core/report.ts:6` |
 | `class Subscription` with parent/child tree | `createSubscription()` → three closures over one cell, flat finalizer `Set` | `src/core/subscription.ts` |
 | `Observable.prototype.pipe` + `pipeFromArray` | `pipeArray` + overloads; `pipe`/`flow` | `src/core/pipe.ts` |
-| `operate()` + `OperatorSubscriber` | `fromMachine(machine)` + pure `step`/`flush` | `src/core/machine.ts` |
+| One flat `operators/` directory of equals | a kernel of operators implemented directly, plus a vocabulary of compositions over it; `test/layering.test.ts` keeps the layers apart | `src/kernel.ts`, `src/vocabulary/*.ts` |
+| `operate()` + `OperatorSubscriber` | `subscribeChild(source, sink, handlers)` with the `PARENT` link for the wiring (§3.3); `fromMachine(machine)` + pure `step`/`flush` for the stateful ones | `src/core/observable.ts:213`, `src/core/machine.ts:42` |
 | `mergeMap`/`concatMap`/`switchMap`/`exhaustMap` + `mergeInternals` | `flatMapWith(strategy)` over `Merge(n) \| Switch \| Exhaust` | `src/operators/flatten.ts` |
-| `merge`/`concat` as their own implementations | `mergeAll()(from(sources))` / `concatAll()(from(sources))` | `src/operators/combine.ts:9` |
-| Variadic overloads for `combineLatest`/`zip` tuples | `ValuesOf<T>` mapped type + `const` type parameters | `src/core/types.ts:85` |
+| `merge`/`concat` as their own implementations | vocabulary: `mergeAll()(from(sources))` / `concatAll()(from(sources))`, both `flatMapWith` underneath | `src/vocabulary/concurrency.ts:52` |
+| Variadic overloads for `combineLatest`/`zip` tuples | `ValuesOf<T>` mapped type + `const` type parameters | `src/core/types.ts:80` |
 | `class AsyncScheduler` / `AsyncAction` / `VirtualTimeScheduler` / `VirtualAction` | `{ now, schedule(work, delay) → cancel }` records | `src/scheduler/scheduler.ts` |
 | `class QueueScheduler` / `QueueAction` (trampoline) | `createQueueScheduler()` → a queue and a `running` flag in a closure | `src/scheduler/scheduler.ts:153` |
 | `class GroupedObservable` + `groupBy`'s internal subscriber | `Map<K, Subject>` + a spread `observable` carrying `key` | `src/operators/group.ts` |
-| `buffer*`/`window*` subscriber classes | one producer per operator, chunks held as Subjects behind `asObservable()` | `src/operators/window.ts` |
+| `buffer*`/`window*` subscriber classes | three window producers plus `bufferWhen`, chunks held as Subjects behind `asObservable()`; every other `buffer*`/`window*` is a composition over them (`collected(window(…))`) | `src/operators/window.ts`, `src/vocabulary/time.ts` |
 | Inner-subscription bookkeeping inside operator classes | `subscribeInner` → a frozen `Inner` handle closable before assignment | `src/operators/inner.ts` |
-| `generate` / `bindCallback` / `bindNodeCallback` / `scheduled` | plain functions; `scheduled` derives from `subscribeOn` + `observeOn` | `src/creation/scheduled.ts`, `bind.ts` |
+| `class Notification<T>` + `materialize`/`dematerialize` | `Notification<A>` records from `nextNotification`, `errorNotification`, `COMPLETE_NOTIFICATION`; `materialize`/`dematerialize` are vocabulary compositions | `src/operators/transform.ts:75`, `src/vocabulary/values.ts:186` |
+| `generate` / `bindCallback` / `bindNodeCallback` / `scheduled` | plain functions: `generate` is a vocabulary composition, the `bind*` pair wrap one `AsyncSubject`, and `scheduled` spells `subscribeOn`/`observeOn` with `timer`, `flatMapWith` and the notification records, because the kernel may not import the vocabulary | `src/vocabulary/creation.ts:59`, `src/creation/bind.ts:60`, `src/creation/scheduled.ts` |
 | `class Subject extends Observable implements Observer` | `createSubject()` → record of closures over an observer `Set` | `src/subject/subject.ts` |
-| `BehaviorSubject`/`ReplaySubject`/`AsyncSubject` overriding `_subscribe` | `makeSubject({ onNext, onSubscribe })` hooks | `src/subject/subject.ts:35` |
-| `class ConnectableObservable` + `multicast`/`refCount` | `shareWith(connector, lifecycle)`; `share`, `shareReplay`, `shareLatest` are choices of connector and lifecycle | `src/subject/subject.ts:245` |
-| `class EmptyError extends Error` et al. | `tagged(name, msg)` + `name`-based guards | `src/core/errors.ts` |
-| `instanceof Observable` | `isObservable` via a `Symbol.for` brand | `src/core/types.ts:63` |
-| `instanceof` dispatch in `from` | capability checks (`then`, `Symbol.iterator`, `subscribe`, …) | `src/creation/creation.ts:165` |
+| `BehaviorSubject`/`ReplaySubject`/`AsyncSubject` overriding `_subscribe` | `makeSubject({ onNext, onSubscribe })` hooks | `src/subject/subject.ts:38` |
+| `class ConnectableObservable` + `multicast`/`refCount`; `share({ connector, resetOn… })` | `share(policy)` interprets a `SharePolicy` record — a connector and three `ResetPolicy` decisions; `shareWith`, `shareReplay` and `shareLatest` build policies; `connectable`/`refCount`/`connect` for explicit connection | `src/subject/subject.ts:254`, `:318`, `:466`, `:530` |
+| Config objects: `retry({ count, delay, resetOnSuccess })`, `repeat({ count, delay })`, `throttle(fn, { leading, trailing })`, `timeout({ first, each, with })` | policy sums and products — `RetryPolicy`, `RepeatPolicy`, `ThrottleStrategy`, `TimeoutPolicy` — each interpreted by one producer, with `assertNever` on a missed branch; shared numeric domains in `src/policies/core.ts` (see `docs/algebraic-policies.md`) | `src/operators/error.ts:80`, `:90`; `src/operators/time.ts:33`, `:69` |
+| `class EmptyError extends Error` et al. | `tagged(name, msg)` + `name`-based guards; `timeoutError` is the one that also carries `info` | `src/core/errors.ts:11`, `:40` |
+| `instanceof Observable` | `isObservable` via a `Symbol.for` brand | `src/core/types.ts:60` |
+| `instanceof` dispatch in `from` | capability checks (`then`, `Symbol.iterator`, `subscribe`, …) | `src/creation/creation.ts:150` |
 | Typeclass-ish inheritance | dictionary records + URI/`Kind` registry | `src/fp/hkt.ts`, `src/fp/typeclasses.ts` |
 | `TestScheduler.run()` with global patching | `runMarbles` + an explicitly passed virtual scheduler | `src/testing/marbles.ts` |
