@@ -154,7 +154,8 @@ both with kernel operators, since the kernel may not import the vocabulary.
 ### Concurrency
 
 Concurrency is what happens when a value starts nested work while earlier work is still running.
-`flatMapWith(strategy)` takes one of four strategies:
+`flatMapWith(strategy)` takes one of four strategies (`Concat` is `Merge(1)`; the sum type has three
+alternatives):
 
 | Vocabulary | Strategy | When new work arrives while work is running |
 | --- | --- | --- |
@@ -174,6 +175,13 @@ The same four strategies run through the time family. Applied to `timer(ms)`:
 | throttle: values are ignored while a wait runs | `Exhaust` |
 | delay: every value waits in parallel | `Merge` |
 | spacing values out by `ms` | `Concat` |
+
+The analogy is exact for `delay`, which is defined that way (`mergeMap(emitAfter(ms))`). For
+`debounce` and `throttle` the strategy reproduces every value but not the completion: `debounce`
+flushes its pending value the moment the source completes, where `switchMap` over a timer would wait
+the timer out, and `throttle` completes with the source, where `exhaustMap` would wait for its inner
+timer. The identity-test table below records the `debounce` case; that difference is why both stay
+kernel.
 
 ### Combination
 
