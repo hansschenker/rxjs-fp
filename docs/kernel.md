@@ -16,19 +16,24 @@ flatMapWith(strategy)   // Merge(n) | Concat | Switch | Exhaust
 timer(ms)
 
 // vocabulary: defined by composition
-export const emitAfter = (ms: number) => <A>(value: A) => timer(ms).pipe(as(value));
-export const delay = (ms: number) => mergeMap(emitAfter(ms));
+export const emitAfter =
+  (ms: number, scheduler: Scheduler = asyncScheduler) =>
+  <A>(value: A): Observable<A> =>
+    timer(ms, undefined, scheduler).pipe(map(() => value));
+export const delay = <A>(ms: number, scheduler: Scheduler = asyncScheduler): Operator<A, A> =>
+  mergeMap<A, A>(emitAfter(ms, scheduler));
 ```
 
-Laws and tests concentrate on the kernel. A vocabulary operator whose composition has passed its
-identity test (below) is correct by construction.
+Marble and law tests concentrate on the kernel. A vocabulary operator is checked once, by the
+identity test below against RxJS; a composition that has passed it is correct by construction.
 
 ## The kernel
 
 Every operator in rxjs-fp is now either kernel or vocabulary; nothing is left outside the family
-modules except infrastructure (schedulers, error constructors, notification helpers, subscription
-utilities and the Promise conversions). `src/kernel.ts` lists the implementation boundary and the
-helpers needed by vocabulary. Some exported names are specializations of a canonical interpreter.
+modules except infrastructure (schedulers, subscription utilities, error constructors and type
+guards, notification helpers, the Promise conversions, `runMachine` and `subscribeChild`).
+`src/kernel.ts` lists the implementation boundary and the helpers needed by vocabulary. Some
+exported names are specializations of a canonical interpreter.
 The algebraic policy API is described in [algebraic-policies.md](algebraic-policies.md).
 
 | Part | What it is |
@@ -39,18 +44,21 @@ The algebraic policy API is described in [algebraic-policies.md](algebraic-polic
 | Specializations | `shareReplay`, `retryWith`, `timeoutFirst` and other public names that select the canonical policies |
 | Adapters | Bridges to platform sources: iterables, Promises, async iterables, callbacks, event APIs, animation frames |
 
-When is a machine kernel? Every value operator is a `fromMachine` machine. The kernel holds the
-machines other operators are built on (`take`, `filter`, `reduce`, …). A machine that nothing builds
-on (`pairwise`, `skipLast`, `single`, `max`, `min`, `bufferCount`) is vocabulary: it is plain data
-and pure `step`/`flush` functions handed to the primitive `fromMachine`, with no shell code of its
-own.
+When is a machine kernel? Most value operators are `fromMachine` machines (`scan`, `reduce`, `take`,
+`takeLast`, `takeWhile`, `skipWhile`, `distinctUntilChanged`, `defaultIfEmpty`, `throwIfEmpty`);
+`map`, `filter` and `tap` are plain closures whose only state is an index counter, and `distinct`
+keeps its `Set` of seen keys in the shell — essential state that a pure `step` could only reproduce
+by copying the set on every value. The kernel holds the machines other operators are built on
+(`take`, `takeWhile`, `reduce`, …). A machine that nothing builds on (`pairwise`, `skipLast`,
+`single`, `max`, `min`, `bufferCount`) is vocabulary: it is plain data and pure `step`/`flush`
+functions handed to the primitive `fromMachine`, with no shell code of its own.
 
 ### Creation
 
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
 | `observable` (primitive) | the constructor: a producer function | everything else |
-| `from` | adopts any input, through the adapters below | `of`, `EMPTY`, `generate` |
+| `from` | adopts any input, through the adapters below | `of`, `EMPTY`, `generate` (or `scheduled`, given a scheduler) |
 | `defer` | creates the Observable per subscription | `iif` |
 | `NEVER` | never emits, never terminates | `never()` |
 | `timer` | a value after a delay, optionally repeating | `interval`, `subscribeOn`, `observeOn`, and every `…Time` operator |
