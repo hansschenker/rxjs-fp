@@ -102,7 +102,16 @@ const createSink = <A>(observer: Observer<A>, subscription: Subscription, intern
   return Object.freeze({
     next: (value: A) => {
       if (stopped || subscription.closed) return;
-      guard(() => observer.next(value));
+      // The hot path: the same rule as guard, written out so no thunk is allocated per value.
+      if (internal) {
+        observer.next(value);
+        return;
+      }
+      try {
+        observer.next(value);
+      } catch (e) {
+        reportUnhandledError(e);
+      }
     },
     error: (err: unknown) => {
       if (stopped || subscription.closed) return;
@@ -212,7 +221,16 @@ export function subscribeChild<A, B>(source: Observable<A>, sink: Sink<B>, handl
   const { next, error, complete } = handlers;
   const observer: ChildObserver<A> = {
     [PARENT]: sink,
-    next: next ? (v) => route(() => next(v)) : (v) => sink.next(v as unknown as B),
+    // The hot path: route, written out so no thunk is allocated per value.
+    next: next
+      ? (v) => {
+          try {
+            next(v);
+          } catch (e) {
+            sink.error(e);
+          }
+        }
+      : (v) => sink.next(v as unknown as B),
     error: error ? (e) => route(() => error(e)) : (e) => sink.error(e),
     complete: complete ? () => route(complete) : () => sink.complete(),
   };

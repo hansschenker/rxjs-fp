@@ -73,7 +73,7 @@ export const observable = <A>(producer: Producer<A>): Observable<A> => {
 };
 ```
 
-Three properties, two of them closures, and the record is frozen (`src/core/observable.ts:167`).
+Three properties, two of them closures, and the record is frozen (`src/core/observable.ts:176`).
 Note the `let self` declared before the object and assigned to it: that is how a method-free record
 refers to itself without `this`. The `pipe` closure captures `self` lexically, so `obs.pipe(f)` and
 `pipe(obs, f)` are the same computation — and detaching the method (`const p = obs.pipe`) cannot
@@ -142,7 +142,7 @@ node is flat; the structure across nodes is not. Points worth noticing:
 
 ### 3.2 The sink: the Observable grammar, enforced in one place
 
-`createSink` (`src/core/observable.ts:90`) wraps a consumer's observer and is the only component
+`createSink` (`src/core/observable.ts:89`) wraps a consumer's observer and is the only component
 that knows the protocol `next* (error | complete)?`:
 
 - nothing is delivered after a terminal notification or after `unsubscribe` (`stopped || subscription.closed`);
@@ -182,7 +182,7 @@ const PARENT: unique symbol = Symbol('rxjs-fp/parent');
 An operator never calls `source.subscribe(...)` directly. It calls
 `subscribeChild(source, sink, handlers)`, which builds an observer carrying `[PARENT]: sink`. Inside
 `subscribe`, that marker is detected and the new subscription is linked into the downstream scope
-**before `producer(sink)` is called** (`src/core/observable.ts:143-148`), with the link removed again
+**before `producer(sink)` is called** (`src/core/observable.ts:152-157`), with the link removed again
 when the child finishes on its own.
 
 Why it matters: consider `unfold` producing values in a synchronous `for(;;)` loop, with `take(1)`
@@ -1363,14 +1363,14 @@ say `new TestScheduler(...)` — which is exactly why it lives there. The marble
 
 | Cost | Reality |
 |---|---|
-| **Allocation per subscription** | Every subscription allocates a frozen record plus several closures, where RxJS allocates one `Subscriber` whose methods live on a shared prototype. For streams at ordinary rates this is noise; for very hot synchronous inner loops it is measurable. |
-| **No shared prototype methods** | RxJS 5 moved to classes partly for V8's inline caches. Closure-per-instance call sites are less friendly to that optimisation. This is the deliberate trade: clarity and testability over the last few percent. |
-| **Stack depth** | Synchronous chains nest producer calls; deep pipes over synchronous sources produce deep stacks, same as RxJS but without class names to orient you in a trace. |
-| **Debuggability** | A stack frame reads `next` or an anonymous arrow rather than `MergeMapSubscriber.prototype._next`. The upside is that `runMachine` lets you debug operator *logic* without a stack at all. |
-| **Type-inference ceiling** | `pipe` and `flow` are typed by overloads, so the tenth step onward (the ninth for `flow`) degrades to `unknown` — exactly RxJS's limitation, from the same cause. |
+| **Allocation per subscription** | Every stage of every subscription allocates a `Subscription` record with three closures and a `Set` of finalizers, a `Sink` record with a getter and three closures, and, for an operator stage, the child observer with its wrappers — where RxJS 7 allocates one `OperatorSubscriber` per stage whose methods live on a shared prototype. This is the biggest gap. Measured 2026-11-24 (Node 24, RxJS 7.8.2, medians of seven runs), 200 000 subscriptions to `of(1).pipe(map(…))` take fifteen to eighteen times as long as in RxJS; a CPU profile puts a fifth of that in garbage collection and most of the rest in `createSink`, `createSubscription` and `subscribe` themselves, and about a third of it is the two `Object.freeze` calls on those records. They stay — §2 and §13 promise frozen records — and this row is where the price is written down. For a stream that subscribes once and runs for a while it is irrelevant; for code that subscribes per event it is not. |
+| **No shared prototype methods** | RxJS 5 moved to classes partly for V8's inline caches. Closure-per-instance call sites are less friendly to that optimisation, and each stage guards delivery twice — the sink's `next` and the child observer's `next` each carry a `try`/`catch`. Measured the same day: a million values through `map` and `filter` take about 3.5 times as long as in RxJS 7.8.2, three hundred thousand values through ten `map` stages about twice as long. Neither wrapper allocates per value — `next` is written out in `createSink` and `subscribeChild` rather than routed through a thunk, precisely because it is the hot path — so what remains is the deliberate trade: clarity and testability over synchronous throughput. At ordinary event rates it is invisible. |
+| **Stack depth** | Synchronous chains nest producer calls, so deep pipes over synchronous sources produce deep stacks, as in RxJS and at the same rate: delivering one value through one stage costs three frames in both libraries — the sink's `next`, the operator's handler and the child observer's `next` here; `Subscriber.next`, `OperatorSubscriber._next` and the operator's arrow there. Whole traces are shorter here (31 frames against 44 for `of → map → mergeMap → filter → subscribe`) because RxJS's subscribe path carries `errorContext` and `lift` frames. |
+| **Debuggability** | A stack frame reads `Object.next` with a position in `observable.js`, with the operator's own file (`transform.js`, `flatten.js`) in between, rather than `Subscriber.next` and `OperatorSubscriber._next` with `map.js` in between. Since RxJS 7 the class name no longer says which operator is running either — RxJS 6's `MergeMapSubscriber` did — so in both libraries you orient by file name. The upside is that `runMachine` lets you debug operator *logic* without a stack at all. |
+| **Type-inference ceiling** | `pipe` and `flow` are typed by overloads, so the tenth step onward (the ninth for `flow`) degrades to `unknown` — exactly RxJS's limitation, from the same cause, and pinned in `test/types.test.ts`. |
 | **No `instanceof` for users** | Consumers must use the exported guards (`isObservable`, `isEmptyError`, …) instead of `instanceof`. Across realms this is an improvement; as an API habit it is a difference to document. |
 | **Variants are closed** | A tagged union is consumed by one exhaustive `switch`, so a new alternative — a fourth `FlattenStrategy`, another `RepeatLimit` — means editing the interpreter in this repository; a consumer cannot subclass their way in. In the policy interpreters, `assertNever` from `src/policies/core.ts` turns a missed branch into a compile error, which is the point: open extension is traded for exhaustiveness, and §1 says why. |
-| **Hooks are less discoverable than overrides** | `makeSubject({ onNext, onSubscribe })` is more compact than three subclasses, but a reader looking for "what does ReplaySubject change?" has to read two closures rather than one class body. |
+| **Hooks are less discoverable than overrides** | `makeSubject({ onNext, onSubscribe })` is more compact than three subclasses, but a reader looking for "what does ReplaySubject change?" has to read two closures rather than one class body — and `AsyncSubject`, which the two hooks could not express, is built from two cores with `next`, `complete` and `error` overridden on top. |
 
 ---
 
@@ -1415,7 +1415,7 @@ Then the invariants, each with the place that enforces it:
 | RxJS 7.8 | rxjs-fp | File |
 |---|---|---|
 | `class Observable<T>` with `subscribe`/`pipe`/`lift` | `observable(producer)` → frozen record of closures | `src/core/observable.ts` |
-| `class Subscriber<T> extends Subscription` | `createSink(observer, subscription, internal)` | `src/core/observable.ts:90` |
+| `class Subscriber<T> extends Subscription` | `createSink(observer, subscription, internal)` | `src/core/observable.ts:89` |
 | `class Subscription` with parent/child tree | `createSubscription()` → three closures over one cell, flat finalizer `Set` | `src/core/subscription.ts` |
 | `Observable.prototype.pipe` + `pipeFromArray` | `pipeArray` + overloads; `pipe`/`flow` | `src/core/pipe.ts` |
 | `operate()` + `OperatorSubscriber` | `fromMachine(machine)` + pure `step`/`flush` | `src/core/machine.ts` |
