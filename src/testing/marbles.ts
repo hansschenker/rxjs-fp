@@ -12,7 +12,8 @@ import { createSubject } from '../subject/subject.js';
  *   'a'   a value (looked up in `values`, else the character itself)
  *   '|'   complete
  *   '#'   error (the `error` argument, default 'error')
- *   '(ab)' synchronous group: all events at the frame of '('
+ *   '(ab)' synchronous group: all events at the frame of '('; every
+ *         character inside still takes its frame, as in RxJS
  *   '^'   subscription point (hot observables, subscription marbles)
  *   '!'   unsubscription point (subscription marbles)
  *
@@ -42,52 +43,40 @@ export const parseMarbles = <A = string>(
   let groupFrame = -1;
   let subscribeFrame = -1;
   let unsubscribeFrame = -1;
+  // Inside a group, events are stamped with the frame of its '(' ...
   const at = (): number => (groupFrame >= 0 ? groupFrame : frame);
-  const advance = (): void => {
-    if (groupFrame < 0) frame++;
-  };
   for (const c of marbles) {
+    if (c === ' ') continue;
     switch (c) {
-      case ' ':
-        break;
       case '-':
-        advance();
         break;
       case '(':
         if (groupFrame >= 0) throw new Error(`rxjs-fp marbles: nested group in "${marbles}"`);
         groupFrame = frame;
-        frame++;
         break;
       case ')':
         if (groupFrame < 0) throw new Error(`rxjs-fp marbles: unmatched ")" in "${marbles}"`);
         groupFrame = -1;
-        frame++;
         break;
       case '^':
         subscribeFrame = at();
-        advance();
         break;
       case '!':
         unsubscribeFrame = at();
-        advance();
         break;
       case '|':
         events.push({ frame: at(), kind: 'C' });
-        if (groupFrame >= 0) frame++;
-        advance();
         break;
       case '#':
         events.push({ frame: at(), kind: 'E', error });
-        if (groupFrame >= 0) frame++;
-        advance();
         break;
       default: {
         const value = values && c in values ? (values[c] as A) : (c as unknown as A);
         events.push({ frame: at(), kind: 'N', value });
-        if (groupFrame >= 0) frame++;
-        advance();
       }
     }
+    // ... but every character except a space takes one frame, as in RxJS
+    frame++;
   }
   if (groupFrame >= 0) throw new Error(`rxjs-fp marbles: unclosed group in "${marbles}"`);
   return { events, subscribeFrame, unsubscribeFrame };
@@ -159,8 +148,9 @@ export interface MarbleOptions {
 }
 
 /**
- * Runs a marble test. Throws an Error describing the first mismatch, so it
- * works with any test runner.
+ * Runs a marble test. The body registers expectations, the virtual clock is
+ * flushed, then every mismatch is reported in one Error, so it works with
+ * any test runner.
  */
 export const runMarbles = (body: (helpers: MarbleHelpers) => void, options: MarbleOptions = {}): void => {
   const scheduler = createVirtualScheduler();

@@ -1280,8 +1280,9 @@ imports a vocabulary module, and that each family module and the root export the
 Because no operator reaches for a global clock (§8), the test harness needs no patching — it only
 needs to hand out a virtual scheduler and read notifications back with their frame numbers.
 
-`parseMarbles` is a **pure function** from a diagram to timed events, which is why it can be tested
-on its own and reused for both sides of an assertion:
+`parseMarbles` is a **pure function** from a diagram to timed events. That is why `test/marbles.test.ts`
+can test it on its own — against the grammar below, and diagram for diagram against RxJS's own
+`TestScheduler.parseMarbles` — and why `runMarbles` can reuse it for both sides of an assertion:
 
 ```ts
 export type RecordedEvent<A = unknown> =
@@ -1291,28 +1292,34 @@ export type RecordedEvent<A = unknown> =
 ```
 
 One character is one frame is one virtual millisecond: `-` advances, a letter emits (looked up in the
-`values` record, or taken literally), `|` completes, `#` errors, `(ab)` groups events at the frame of
-the `(`, `^` marks a subscription point and `!` an unsubscription. Groups are handled with a
-`groupFrame` sentinel rather than recursion, and the three malformed cases — nested, unmatched and
-unclosed groups — throw with the offending diagram in the message.
+`values` record, or taken literally), `|` completes, `#` errors (with the `error` argument, `'error'`
+by default), `(ab)` groups events at the frame of the `(`, `^` marks a subscription point and `!` an
+unsubscription; a space is ignored, so diagrams can be aligned. A group changes only which frame its
+events are stamped with — every character inside it still takes its frame, so `(ab)-c|` emits `c` at
+frame 5, exactly as RxJS does. Groups are handled with a `groupFrame` sentinel rather than recursion,
+and the three malformed cases — nested, unmatched and unclosed groups — throw with the offending
+diagram in the message.
 
 The pieces built on it mirror the cold/hot distinction exactly:
 
 - **`cold(marbles)`** schedules the parsed events *inside the producer*, so each subscription gets its
   own set of scheduled actions and its own teardown that cancels them. Cold means re-run per
   subscriber, and here that is literally what the code does.
-- **`hot(marbles)`** schedules them once against a `createSubject`, offset by the `^` frame, and hands
-  out `subject.asObservable()`. Shared by construction.
+- **`hot(marbles)`** schedules them once against a `createSubject`, offset by the `^` frame (events
+  drawn before the `^` are dropped), and hands out `subject.asObservable()`. Shared by construction.
 - **`record(source, scheduler, …)`** subscribes and pushes `{ frame: scheduler.now(), kind, … }` for
   every notification — the frame comes from the virtual clock, so it is exact rather than measured.
 
 `runMarbles` ties it together with one ordering trick worth noticing: `expectObservable(...).toBe(...)`
 does not compare anything when you call it. It pushes a *closure* onto a `checks` array. The body of
 your test therefore declares all its expectations while virtual time is still at zero; then
-`runMarbles` calls `scheduler.flush(maxFrames ?? 1000)`, and only afterwards runs the checks and
-throws a single `Error` describing every mismatch with both diagrams rendered. Comparison uses a
-structural `deepEqual` that compares `Error`s by `name` and `message` — consistent with §11, where
-errors are tagged values rather than class instances.
+`runMarbles` calls `scheduler.flush(maxFrames ?? 1000)` — the virtual scheduler also gives up after a
+million actions at one instant, which is what a zero-delay loop looks like — and only afterwards runs
+the checks and throws a single `Error` listing every mismatch, each with the expected diagram and both
+recordings rendered as `frame:value` lists. Comparison uses a structural `deepEqual` that compares
+`Error`s by `name` and `message` — consistent with §11, where errors are tagged values rather than
+class instances. The fifth helper, `time(marbles)`, only counts frames to the first `|`, so durations
+can be written as diagrams too.
 
 ### Differential testing against RxJS
 
@@ -1322,19 +1329,33 @@ library whose whole premise is "same API, different architecture underneath".
 
 The harness runs the same marble inputs through both implementations on their own virtual clocks —
 rxjs-fp via `runMarbles`/`record`, RxJS via its `TestScheduler` — then normalises both recordings to
-`{ frame, kind, value | error }` and requires them to be equal. Errors are compared as
+`{ frame, kind, value | error }` and requires them to be equal. The inputs are not hand-written:
+`marbleArb` has fast-check generate random cold diagrams (frames, values `a`–`e`, then complete,
+error or nothing), and each property runs `LAW_RUNS` times (200 by default). Errors are compared as
 `name:message`, which is exactly the right granularity given §11: rxjs-fp's errors are tagged values
 and RxJS's are class instances, so they can never be structurally identical, but a `TimeoutError`
-carrying the same message is the same observable behaviour. `test/differential.test.ts` applies it
-across the conditional and mathematical operators, the duration-selector family, `buffer`/`window`,
-and the higher-order operators — the four areas where "the same operator with a different clock" is
-most likely to diverge by a frame.
+carrying the same message is the same observable behaviour.
+
+`test/differential.test.ts` started with the four areas where "the same operator with a different
+clock" is most likely to diverge by a frame — the conditional and mathematical operators, the
+duration-selector family, `buffer`/`window`, and the higher-order operators — and grew with the
+library: the `share` lifecycles and the `publish` family (§10), identity tests for the six
+vocabulary families against the RxJS primitives their compositions replace (the kernel/vocabulary
+programme of `docs/kernel.md`), the former outliers such as `race`, `withLatestFrom` and `fromEvent`,
+and the window operators compared including same-frame order. It also records the one place rxjs-fp
+knowingly disagrees with RxJS 7.8.2: `sequenceEqual` on sequences of different length answers `false`
+here, where RxJS answers `true` because its completion handler inspects only the other side's buffer.
+Writing that case as a differential test turns the divergence into a decision rather than an
+accident.
 
 Alongside these, `test/laws.test.ts` checks the §12 instances with fast-check over generated timed
-streams, at a run count controlled by the `LAW_RUNS` environment variable (CI sets `1000`).
-`test/machine.test.ts` exercises machines through `runMachine` with no streams at all, and
-`test/purity.test.ts` is the AST guard of §14 — which scans `src/` and `examples/` but deliberately
-**not** `test/`, since test helpers are free to use whatever JavaScript they like.
+streams, at the same `LAW_RUNS` run count (CI sets `1000` for both suites). `test/machine.test.ts`
+shows the payoff of §5: `runMachine` evaluates a machine over a plain array with no Observable in
+sight, and the same machine behind `fromMachine` must agree. `test/purity.test.ts` is the AST guard of
+§14. It scans `src/` and `examples/` but deliberately **not** `test/`, so the differential driver may
+say `new TestScheduler(...)` — which is exactly why it lives there. The marble harness itself is in
+`src/testing/`, ships as `rxjs-fp/testing`, and is held to the rule like any other module: its
+`let`s are function-local and `new Error` is on the allow-list.
 
 ---
 
