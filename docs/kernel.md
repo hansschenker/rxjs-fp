@@ -338,7 +338,7 @@ test:
 
 A limit of the harness: the rxjs-fp and RxJS test schedulers order a hot and a cold event in the
 same frame differently (even a plain `merge` shows it), and rxjs-fp subscribes just after a hot
-value at frame 0. Identity tests therefore use cold inputs, or hot inputs that avoid those ties.
+value at frame 0. Identity tests therefore use cold inputs only; the harness accepts hot inputs, but no test needs them.
 
 A second limit: in run mode, RxJS's `TestScheduler` runs same-frame `asyncScheduler` actions in the
 order their timer records were created, not in scheduling order, and throws `Expected a due
@@ -351,7 +351,7 @@ Results so far:
 | Vocabulary | Composition | Result |
 | --- | --- | --- |
 | `debounceTime(ms)` | `debounce(() => timer(ms))` | identical |
-| `debounceTime(ms)` | `switchMap(emitAfter(ms))` | differs: does not flush the pending value on completion, so `debounce` is the better base |
+| `debounceTime(ms)` | `switchMap(emitAfter(ms))` | differs: the pending value arrives when its timer fires, not at completion, so `debounce` is the better base |
 | `throttleTime(ms, mode)` and its variants | `throttle(() => timer(ms), mode)` | identical on the tested diagrams, for all four modes |
 | `auditTime(ms)` | `audit(() => timer(ms))` | identical |
 | `sampleTime(ms)` | `sample(interval(ms))` | identical. RxJS defines `sampleTime` this way; rxjs-fp's former native version emitted the previous value when a tick and a value fell in the same frame, and the composition fixed that |
@@ -384,6 +384,11 @@ Results so far:
 | `race` | `merge` with the winner selected | differs: the losers stay subscribed, and every input is subscribed even after a synchronous winner. Stays in the kernel |
 | `materialize` | `map` to `N`, `concat` with one `C`, `catchError` to one `E` | identical |
 | `dematerialize` | `takeWhile` (not `C`), then `mergeMap` into `of` or `throwError` | identical, including a `C` in the middle of a stream and a stream with no terminal |
+| `mergeMap`, `concatMap`, `switchMap`, `exhaustMap`, the four `…All`, `merge`, `concat`, `mergeWith`, `concatWith`, `mergeScan`, `switchScan` | `flatMapWith(strategy)`; the same over `identity`; `mergeAll`/`concatAll` over `from(sources)`, with the source first for `…With`; `scanWith(strategy)` | identical, including `mergeMap` with a concurrency limit |
+| `windowCount`, `windowTime`, `windowTimeEvery`, `windowTimeOrCount`, `windowTimeEveryOrCount` | `windowToggle` driven by counts of the source's own values (through `afterDelivery`); `windowWhen` closed by a timer; `windowToggle` opened by an interval; a timer raced with a count | identical in values, frames and window membership, and in same-frame opens and closes for `windowCount`, `windowTime` and `windowTimeOrCount`; `windowTimeEveryOrCount` orders a same-frame fill and close differently (README) |
+| `as`, `withIndex`, `ignoreElements` | `map`; `map`; `filter` of nothing | identical |
+| `emitAfter(ms)` | `timer(ms)`, then `map` | identical as a projection under `concatMap`, spacing values out (the `Concat` row of the time analogy) |
+| `pairwise`, `skipLast`, `single`, `max`, `min` | leaf machines moved as written, not compositions | identical |
 
 ## The naming style for pipelines
 

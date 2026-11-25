@@ -879,3 +879,46 @@ describe('window vocabulary matches RxJS including same-frame order', () => {
     completingMarbleArb(),
   );
 });
+
+describe('compositions rejected by the identity test stay kernel (docs/kernel.md)', () => {
+  it('take(n) vs takeWhile((_, i) => i < n): the same values, but takeWhile completes a value later', () => {
+    const inputs = { a: { marbles: 'a-b-c-d|' } };
+    const take = runOurs(inputs, ({ a }) => a.pipe(fp.take(2)));
+    expect(take).toEqual(runTheirs(inputs, ({ a }) => a.pipe(rx.take(2))));
+    expect(take).toEqual([{ frame: 0, kind: 'N', value: 'a' }, { frame: 2, kind: 'N', value: 'b' }, { frame: 2, kind: 'C' }]);
+    expect(runOurs(inputs, ({ a }) => a.pipe(fp.takeWhile((_, i) => i < 2)))).toEqual([
+      { frame: 0, kind: 'N', value: 'a' },
+      { frame: 2, kind: 'N', value: 'b' },
+      { frame: 4, kind: 'C' },
+    ]);
+  });
+  it('debounceTime(ms) vs switchMap(emitAfter(ms)): the pending value arrives when its timer fires, not at completion', () => {
+    const inputs = { a: { marbles: 'a-b---c|' } };
+    const debounced = runOurs(inputs, ({ a }, s) => a.pipe(fp.debounceTime(2, s)));
+    expect(debounced).toEqual(runTheirs(inputs, ({ a }, s) => a.pipe(rx.debounceTime(2, s))));
+    expect(debounced).toEqual([{ frame: 4, kind: 'N', value: 'b' }, { frame: 7, kind: 'N', value: 'c' }, { frame: 7, kind: 'C' }]);
+    expect(runOurs(inputs, ({ a }, s) => a.pipe(fp.switchMap(fp.emitAfter(2, s))))).toEqual([
+      { frame: 4, kind: 'N', value: 'b' },
+      { frame: 8, kind: 'N', value: 'c' },
+      { frame: 8, kind: 'C' },
+    ]);
+  });
+  // Identical output (step 2), yet each resubscription nests one more catchError or concat layer
+  // (step 4), so the canonical interpreters stay in the kernel.
+  const recursiveRetry = (source: Observable<string>, left: number): Observable<string> =>
+    source.pipe(fp.catchError((e) => (left > 0 ? recursiveRetry(source, left - 1) : fp.throwError(() => e))));
+  const recursiveRepeat = (source: Observable<string>, runs: number): Observable<string> =>
+    runs > 1 ? fp.concat(source, fp.defer(() => recursiveRepeat(source, runs - 1))) : source;
+  prop1('retry as recursion through catchError: identical output to RxJS retry(2)', {
+    ours: ({ a }) => recursiveRetry(a, 2).pipe(fp.take(12)),
+    theirs: ({ a }) => a.pipe(rx.retry(2), rx.take(12)),
+  });
+  prop1(
+    'repeat as recursion through concat: identical output to RxJS repeat(3)',
+    {
+      ours: ({ a }) => recursiveRepeat(a, 3).pipe(fp.take(12)),
+      theirs: ({ a }) => a.pipe(rx.repeat(3), rx.take(12)),
+    },
+    completingMarbleArb(),
+  );
+});
