@@ -191,11 +191,12 @@ kernel.
 | `zip` | pairs values by position | `zipWith`, `zipAll`, `sequenceEqual` |
 | `race` | follows whichever input emits first | `raceWith` |
 
-Vocabulary on top, together with the concurrency vocabulary: `takeUntil`, `skipUntil`,
-`withLatestFrom`, `sequenceEqual`, `forkJoin`, `startWith`, `endWith`, `onErrorResumeNext`,
-`onErrorResumeNextWith`, `partition`.
+The module's other members use the concurrency vocabulary: `takeUntil`, `skipUntil` and
+`withLatestFrom` on `merge`; `startWith`, `endWith`, `onErrorResumeNext` and `onErrorResumeNextWith`
+on `concat`; the `…All` pair on `mergeMap`. `partition` lives in the module as well, but is `filter`
+twice (Value-based table).
 
-Four of those start from a sequence with its end made visible, the values as `some` and then one
+Four definitions start from a sequence with its end made visible, the values as `some` and then one
 `none` (`ended` in `src/vocabulary/combination.ts`). `takeUntil` and `skipUntil` merge it with the
 notifier. `withLatestFrom` merges the others, tagged, into the ended source and runs a machine that
 keeps each other's latest value and emits on a source value once every slot is filled; the source's
