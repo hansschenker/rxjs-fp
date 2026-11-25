@@ -287,12 +287,14 @@ import { delay } from 'rxjs-fp/time';
 | --- | --- |
 | `rxjs-fp/kernel` | the kernel operators |
 | `rxjs-fp/creation`, `rxjs-fp/values`, `rxjs-fp/time`, `rxjs-fp/concurrency`, `rxjs-fp/combination`, `rxjs-fp/errors`, `rxjs-fp/multicast` | each family's kernel operators and its vocabulary |
+| `rxjs-fp/fp`, `rxjs-fp/testing` | the functional layer (`Option`, `Either`, typeclasses, do-notation); marbles and virtual time |
 | `rxjs-fp` | everything, for convenience and for existing code |
 
 Rules that keep the layering intact:
 
-- **Vocabulary modules import only from the kernel.** A test checks the import statements of every
-  vocabulary file, as `test/purity.test.ts` checks the syntax tree.
+- **Vocabulary modules import only from the kernel entry point, or from another vocabulary module.**
+  A test checks the import statements of every vocabulary file, as `test/purity.test.ts` checks the
+  syntax tree.
 - **No cost for convenience.** rxjs-fp is marked `sideEffects: false`, so importing from the root
   still bundles only what is used.
 - **Vocabulary definitions follow the naming style below.** The library's own source shows the
@@ -300,24 +302,25 @@ Rules that keep the layering intact:
 
 ### Status
 
-| Module | Source | State |
+| Module | Source | Vocabulary defined there |
 | --- | --- | --- |
-| `rxjs-fp/kernel` | `src/kernel.ts` | done: re-exports the kernel plus the types and helpers vocabulary needs |
-| `rxjs-fp/concurrency` | `src/vocabulary/concurrency.ts` | done: `mergeMap`, `concatMap`, `switchMap`, `exhaustMap`, the four `…All`, `merge`, `concat`, `mergeWith`, `concatWith` |
-| `rxjs-fp/time` | `src/vocabulary/time.ts` | done: `delay`, `emitAfter`, `debounceTime`, `throttleTime` and its variants, `throttleTimeWith`, `auditTime`, `sampleTime`, `windowCount`, `windowTime`, `windowTimeEvery`, `windowTimeOrCount`, `windowTimeEveryOrCount`, `observeOn`, `subscribeOn` |
-| `rxjs-fp/values` | `src/vocabulary/values.ts` | done: `as`, `withIndex`, `skip`, `ignoreElements`, `count`, `toArray`, `first`, `last`, `elementAt`, `find`, `findIndex`, `every`, `isEmpty`, `distinctUntilKeyChanged`, `materialize`, `dematerialize` |
-| `rxjs-fp/creation` | `src/vocabulary/creation.ts` | done: `of`, `EMPTY`, `throwError`, `range`, `interval`, `iif` |
-| `rxjs-fp/combination` | `src/vocabulary/combination.ts` | done: `takeUntil`, `skipUntil`, `withLatestFrom`, `sequenceEqual`, `forkJoin`, `startWith`, `endWith`, `onErrorResumeNext`, `combineLatestWith`, `zipWith`, `raceWith`, `onErrorResumeNextWith`, `combineLatestAll`, `zipAll`, `partition` |
-| `rxjs-fp/errors` | `src/vocabulary/errors.ts` | done: `retry`, `times`, `timesWithDelay`, `exponentialBackoff`, `catchTimeout`, `onErrorReturn` |
-| `rxjs-fp/multicast` | `src/vocabulary/multicast.ts` | done: `share`, `shareReplay`, `shareLatest`, `publish`, `publishReplay`, `publishBehavior`, `publishLast` |
-| former outliers | the modules above | done: every operator is now in a family module. Leaf machines (`pairwise`, `skipLast`, `single`, `max`, `min`, `bufferCount`) moved as written; `filterMap`, `skipUntil`, `timeInterval`, `timestamp`, `delayWhen`, `throttle…`, `mergeScan`, `switchScan`, `fromEvent`, `generate`, `empty`, `never` and six buffer operators became compositions |
+| `rxjs-fp/kernel` | `src/kernel.ts` | none: it re-exports the kernel plus the types and helpers the vocabulary needs |
+| `rxjs-fp/concurrency` | `src/vocabulary/concurrency.ts` | `mergeMap`, `concatMap`, `switchMap`, `exhaustMap`, `mergeAll`, `concatAll`, `switchAll`, `exhaustAll`, `merge`, `concat`, `mergeWith`, `concatWith`, `mergeScan`, `switchScan` |
+| `rxjs-fp/time` | `src/vocabulary/time.ts` | `emitAfter`, `delay`, `observeOn`, `subscribeOn`, `debounceTime`, `throttleTime`, `throttleTimeWith`, `throttleTimeTrailing`, `throttleTimeLeadingAndTrailing`, `auditTime`, `sampleTime`, `throttleTrailing`, `throttleLeadingAndTrailing`, `timestamp`, `timeInterval`, `delayWhen`, `windowCount`, `windowTime`, `windowTimeEvery`, `windowTimeOrCount`, `windowTimeEveryOrCount`, `buffer`, `bufferTime`, `bufferTimeEvery`, `bufferTimeOrCount`, `bufferTimeEveryOrCount`, `bufferToggle` |
+| `rxjs-fp/values` | `src/vocabulary/values.ts` | `as`, `withIndex`, `count`, `toArray`, `skip`, `ignoreElements`, `distinctUntilKeyChanged`, `first`, `last`, `elementAt`, `find`, `findIndex`, `materialize`, `dematerialize`, `every`, `isEmpty`, `filterMap`, `pairwise`, `skipLast`, `bufferCount`, `single`, `max`, `min` |
+| `rxjs-fp/creation` | `src/vocabulary/creation.ts` | `of`, `EMPTY`, `throwError`, `range`, `interval`, `iif`, `empty`, `never`, `generate`, `fromEvent` |
+| `rxjs-fp/combination` | `src/vocabulary/combination.ts` | `takeUntil`, `forkJoin`, `startWith`, `endWith`, `onErrorResumeNext`, `withLatestFrom`, `sequenceEqual`, `combineLatestWith`, `zipWith`, `raceWith`, `onErrorResumeNextWith`, `combineLatestAll`, `zipAll`, `partition`, `skipUntil` |
+| `rxjs-fp/errors` | `src/vocabulary/errors.ts` | `times`, `timesWithDelay`, `exponentialBackoff`, `catchTimeout`, `onErrorReturn` |
+| `rxjs-fp/multicast` | `src/vocabulary/multicast.ts` | `shareLatest`, `publish`, `publishReplay`, `publishBehavior`, `publishLast` |
 
-`test/layering.test.ts` enforces the three rules: vocabulary imports only the kernel, the kernel never
-reaches the vocabulary (checked transitively), and the root exports the same functions as the
-family modules. Kernel files that used a vocabulary operator internally (`delayWhen`,
-`combineLatestAll`, `zipAll`, `startWith`, `endWith`) now call `flatMapWith` directly, and
-`scheduled` spells `subscribeOn` and `observeOn` with `timer`, `flatMapWith`, `map`, `takeWhile`,
-`catchError` and the notification helpers.
+Every operator is in a family module. The leaf machines (`pairwise`, `skipLast`, `single`, `max`,
+`min`, `bufferCount`) moved as written; the other later arrivals became compositions.
+
+`test/layering.test.ts` enforces the three rules: vocabulary imports only the kernel entry point or
+another vocabulary module, the kernel never reaches the vocabulary (checked transitively), and the
+root exports the same functions as the family modules. No kernel file imports a vocabulary
+operator: `scheduled` spells `subscribeOn` and `observeOn` with `timer`, `flatMapWith`, `map`,
+`takeWhile`, `catchError` and the notification helpers (`src/creation/scheduled.ts`).
 
 ## The identity test
 
