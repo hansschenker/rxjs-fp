@@ -244,9 +244,14 @@ the JavaScript call stack; a scheduled wait can break that recursion.
 
 ### How far from 30
 
-The original 0.1 census counted 52 base operators. The 0.2 policy work consolidates retry and
-sharing behavior behind canonical interpreters, so that historical count should not be treated as
-a current export count. A smaller kernel is still a goal. Further reductions each need an identity test:
+The plan started from about 40 operators, to be trimmed towards 30. The 0.1 census, taken after
+the window family had moved, counted 52 base operators (8 creation, 14 value, 10 time,
+3 concurrency, 5 combination, 6 errors, 6 multicast); the two primitives, the adapters and the two
+named cores (`groupBy`, `timeout`) were not counted. By the same rules the kernel now has 43
+(6, 12, 8, 3, 3, 5, 6). The five reductions below took eight, and the 0.2 policy work took one
+more: `retryWith` and `retryConsecutiveWith` became specializations of one `retry` interpreter.
+The export count is higher than either figure, because specializations keep their names. A smaller
+kernel is still a goal, and every reduction needs an identity test. The five planned ones are done:
 
 - **The window family** — done. `windowCount` and the four `windowTime…` are vocabulary over
   `windowToggle`, `windowWhen` and timers; one base operator and one named core went. The window
