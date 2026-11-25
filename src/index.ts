@@ -27,7 +27,8 @@ export { pipe, flow, identity, noop } from './core/pipe.js';
 export { fromMachine, runMachine, cont, halt, flushWith, flushError } from './core/machine.js';
 export type { Machine, Step, Flush } from './core/machine.js';
 export * from './core/errors.js';
-export * from './policies/core.js';
+export { natural, positiveInteger, milliseconds, positiveMilliseconds, epochMilliseconds, unlimited, limited, immediate, after } from './policies/core.js';
+export type { NonNegativeInt, PositiveInt, Milliseconds, PositiveMilliseconds, EpochMilliseconds, Signal, Limit, ImmediateDelay, AfterDelay } from './policies/core.js';
 
 // scheduling
 export {

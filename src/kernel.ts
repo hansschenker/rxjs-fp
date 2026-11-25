@@ -21,7 +21,8 @@ export { emptyError, argumentOutOfRangeError, notFoundError, sequenceError, isTi
 export type { TimeoutInfo } from './core/errors.js';
 export { some, none, isSome } from './fp/option.js';
 export type { Option } from './fp/option.js';
-export * from './policies/core.js';
+export { natural, positiveInteger, milliseconds, positiveMilliseconds, epochMilliseconds, unlimited, limited, immediate, after } from './policies/core.js';
+export type { NonNegativeInt, PositiveInt, Milliseconds, PositiveMilliseconds, EpochMilliseconds, Signal, Limit, ImmediateDelay, AfterDelay } from './policies/core.js';
 
 // Creation
 export { observable } from './core/observable.js';

@@ -66,7 +66,8 @@ family entry point. The root and family entries export the same function objects
 Invalid domain inputs throw an `ArgumentOutOfRangeError` at policy construction. Infinity
 is represented by an alternative, not a numeric payload. `after(0)` is a scheduled wait,
 distinct from `immediate()`; whether that scheduler runs synchronously is the scheduler's
-decision. Replay count and age bounds are normalized to at least one, matching RxJS 7.8.2.
+decision. Replay count and age bounds are normalized to at least one, matching RxJS 7.8.2; the
+constructors reject zero, so the guard only covers hand-built records.
 
 `Signal` is `ObservableInput<unknown>`: an Observable, subscribable, Promise, iterable,
 async iterable or array-like input accepted by this runtime. It is the signal's events
