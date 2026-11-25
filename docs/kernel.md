@@ -410,8 +410,9 @@ from(userIds).pipe(loadUsersInOrder, shiftBy(500));
 
 - **One name per concept.** `emitAfter` is defined once; `shiftBy` and `spaceOutBy` differ only in
   their strategy, and the difference is visible at a glance.
-- **Dependencies are arguments.** `loadUsersInOrderWith(fetch)` gives the version for the app and
-  a version with a fake `fetch` for the test, without a mocking library.
+- **Dependencies are arguments.** `loadUsersInOrder(getUser, scheduler)` in `examples/users` gives
+  the version for the app and a version with a fake service and virtual time for the test, without a
+  mocking library; that example is this section written out in full.
 - **Errors are handled inside the named projection.** There, an error ends only that value's nested
   work, and the pipeline goes on:
 
@@ -420,7 +421,7 @@ from(userIds).pipe(loadUsersInOrder, shiftBy(500));
     limit: additionalRetries(2), delay: after(1000), counter: keepCount(),
   };
   const fetchUserReliably = (id: number) =>
-    fetchUser(id).pipe(retry(requestRetries, scheduler), attempt());   // errors become Either values
+    fetchUser(id).pipe(retry(requestRetries, scheduler), attempt());   // errors become Either values (`attempt` from `rxjs-fp/fp`)
   ```
 
   Handled at the end of the pipeline instead, the first error ends the whole stream.
