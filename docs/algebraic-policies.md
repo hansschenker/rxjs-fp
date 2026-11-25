@@ -107,8 +107,9 @@ const repeated$ = source$.pipe(repeat(repeatThreeTimes, scheduler));
 ```
 
 The default is unlimited runs with an immediate restart. Immediate restarts remain
-synchronous and recursive; an unbounded synchronously completing source needs a terminating
-or scheduled policy. Source teardown finishes before the next synchronous run begins.
+synchronous and recursive; an unbounded synchronously completing source overflows the call
+stack after a few thousand runs and needs a terminating or scheduled policy. Source teardown
+finishes before the next synchronous run begins.
 
 ### Retry: additional attempts and the counter rule
 
