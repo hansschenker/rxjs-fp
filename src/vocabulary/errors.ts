@@ -1,10 +1,11 @@
 /**
  * Error vocabulary: `import { retry, timesWithDelay } from 'rxjs-fp/errors'`.
  *
- * The kernel interprets RepeatPolicy and RetryPolicy directly. The optional
- * `retryWith` and `retryConsecutiveWith` vocabulary adapts a pure decision
- * function `(error, attempt) => RetryDecision` to that same retry engine.
- * Decisions are data: `retryNow`, `retryAfter(ms)`, `giveUp`.
+ * The kernel interprets RepeatPolicy and RetryPolicy directly. The kernel's
+ * `retryWith` and `retryConsecutiveWith` specializations adapt a pure decision
+ * function `(error, attempt) => RetryDecision` to that same retry engine; the
+ * decision functions below are the vocabulary. Decisions are data: `retryNow`,
+ * `retryAfter(ms)`, `giveUp`.
  *
  * Why the resubscribing operators stay in the kernel: written as recursion
  * (`catchError` that returns the retried source), each retry adds one

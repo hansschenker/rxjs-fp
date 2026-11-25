@@ -220,8 +220,8 @@ definition answers `false` as soon as a value is paired with the other side's en
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
 | `catchError` | replaces an error with another Observable | `catchTimeout`, `onErrorReturn`, `onErrorResumeNext`, `materialize` |
-| `retry(policy, scheduler)` | restarts after errors according to additional-retry limit, wait and counter choices | `retryWith`, `retryConsecutiveWith`; decision functions `times`, `timesWithDelay`, `exponentialBackoff` |
-| `repeat(policy, scheduler)` | restarts after completion according to total-run limit and wait choice | |
+| `retry(policy, scheduler)` | restarts after errors according to additional-retry limit, wait and counter choices; `retryWith` and `retryConsecutiveWith` are the kernel's own specializations, turning a decision function into a signal | decision functions `times`, `timesWithDelay`, `exponentialBackoff` |
+| `repeat(policy, scheduler)` | restarts after completion according to total-run limit and wait choice | `windowCount` (re-subscribes its opening count) |
 | `finalize` | runs a function on teardown | |
 | `tap` | runs a side effect per notification | |
 
