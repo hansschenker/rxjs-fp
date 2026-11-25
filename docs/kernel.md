@@ -237,10 +237,10 @@ the JavaScript call stack; a scheduled wait can break that recursion.
 | Kernel | Behaviour | Vocabulary built on it |
 | --- | --- | --- |
 | the Subjects | `createSubject`, `createBehaviorSubject`, `createReplaySubject`, `createAsyncSubject` | |
-| `connectable`, `connectableOnce` | connect on `connect()`: the theater view; `Once` cannot reconnect | `publish`, `publishReplay`, `publishBehavior`, `publishLast` |
+| `connectable`, `connectableOnce` | connect on `connect()`: the theater view (seats first, curtain on `connect()`; README). `connectable` takes a fresh Subject after each connection ends and starts over; `Once` keeps its one Subject, so an ended source stays ended for late subscribers | `publish`, `publishReplay`, `publishBehavior`, `publishLast` |
 | `refCount` | connects a connectable while it has subscribers | |
 | `connect(selector)` | multicasts within one subscription | |
-| `share(policy)` | connects automatically, with independent reset decisions for error, completion and no subscribers | `shareReplay`, `shareWith`, `shareLatest` |
+| `share(policy)` | connects automatically, with independent reset decisions for error, completion and no subscribers; `shareReplay` (its own `ShareReplayPolicy`, translated into a `share` policy and a replay Subject) and `shareWith` are the kernel's own specializations | `shareLatest` |
 
 ### How far from 30
 

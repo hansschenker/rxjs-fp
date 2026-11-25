@@ -3,11 +3,12 @@
  *
  * Two views of one idea, a Subject between the source and its subscribers:
  *
- *   automatic connection   share(policy)                    → shareReplay, shareLatest
+ *   automatic connection   share(policy)                    → shareLatest
  *   explicit connection    connectableOnce(source, connector) → publish, publishReplay, publishBehavior, publishLast
  *
  * Each named composition chooses a Subject and lifecycle policy. The canonical
- * share and shareReplay interpreters live in the kernel.
+ * share interpreter lives in the kernel; shareReplay and shareWith are the
+ * kernel's own specializations of it, re-exported here.
  *
  * Built only on the kernel (checked by test/layering.test.ts), and each
  * definition confirmed against RxJS 7 by test/differential.test.ts.
